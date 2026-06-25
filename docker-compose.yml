@@ -1,0 +1,19 @@
+services:
+  chuggernaut:
+    build: .
+    container_name: chuggernaut
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    env_file:
+      - .env
+    environment:
+      - WORKOUT_DB_PATH=/home/admin/data/chuggernaut.db
+    volumes:
+      - /home/admin/data:/home/admin/data
+    networks:
+      - tools-net
+
+networks:
+  tools-net:
+    external: true
