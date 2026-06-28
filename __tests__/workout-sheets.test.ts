@@ -39,16 +39,16 @@ beforeEach(async () => {
 // ---- Fake Sheets client ----
 
 import {
-  TAB_PROGRAM,
   TAB_TRAINING_MAXES,
-  TAB_SESSIONS,
-  TAB_SETS,
   TAB_BODY_WEIGHT,
   TAB_SWAPS,
+  CB16_BLOCKS,
+  BLOCK_TAB_NAMES,
 } from "@/lib/workout-sheets";
+import { WorkoutSheetWriter } from "@/lib/sheet-writer";
 
-// TAB_PROGRAM is export-only — it appears in clears+updates but not in import upsert counts.
-const ALL_TABS = [TAB_PROGRAM, TAB_TRAINING_MAXES, TAB_SESSIONS, TAB_SETS, TAB_BODY_WEIGHT, TAB_SWAPS];
+// All tabs: 4 block tabs + 3 non-block tabs
+const ALL_TABS = [...CB16_BLOCKS.map(b => b.name), TAB_TRAINING_MAXES, TAB_BODY_WEIGHT, TAB_SWAPS];
 
 function makeFakeSheets(getData: Record<string, unknown[][]> = {}) {
   const updates: { range: string; values: unknown[][] }[] = [];
@@ -110,9 +110,14 @@ describe("exportToSheet", () => {
     expect(tmUpdate.values.length).toBe(1 + 4); // header + 4 lifts
     expect(tmUpdate.values[1][0]).toBe("squat");
 
-    const setsUpdate = updates.find((u) => u.range.startsWith(`${TAB_SETS}!`))!;
-    expect(setsUpdate.values[0][2]).toBe("exercise");
-    expect(setsUpdate.values[1]).toContain("Competition Squat");
+    // Block tabs: first row is the writer header, subsequent rows include data + separators
+    const block1Update = updates.find((u) => u.range.startsWith(`${CB16_BLOCKS[0].name}!`))!;
+    expect(block1Update).toBeDefined();
+    expect(block1Update.values[0]).toEqual(WorkoutSheetWriter.HEADER);
+    // A logged set for Week 1 Day 1 Competition Squat should appear
+    const dataRow = block1Update.values.find(r => WorkoutSheetWriter.parseKey(r[0]) !== null && r[4] === "Competition Squat");
+    expect(dataRow).toBeDefined();
+    expect(dataRow![7]).toBe(100); // actual weight
 
     const bwUpdate = updates.find((u) => u.range.startsWith(`${TAB_BODY_WEIGHT}!`))!;
     expect(bwUpdate.values[1]).toEqual(["2026-06-20", 82.5]);
@@ -144,19 +149,14 @@ describe("exportToSheet", () => {
 // ---- Import (Sheet -> DB) ----
 
 describe("importFromSheet", () => {
-  it("upserts rows into DB tables", async () => {
+  it("upserts TM and body weight from non-block tabs", async () => {
     const { importFromSheet } = await import("@/lib/workout-sheets");
-    const { getSetsForSession, getTrainingMaxes } = await import("@/lib/workout");
+    const { getTrainingMaxes } = await import("@/lib/workout");
 
     const data: Record<string, unknown[][]> = {
       [TAB_TRAINING_MAXES]: [
         ["lift", "e1rm", "training_max", "set_at"],
         ["squat", "180", "162", "2026-06-01T00:00:00Z"],
-      ],
-      [TAB_SETS]: [
-        ["week", "day", "exercise", "set_number", "prescribed_weight", "prescribed_reps",
-         "prescribed_rpe", "actual_weight", "actual_reps", "actual_rpe", "e1rm", "logged_at"],
-        ["1", "1", "Competition Squat", "1", "100", "5", "7", "100", "5", "7.5", "116.7", "2026-06-01T10:00:00Z"],
       ],
       [TAB_BODY_WEIGHT]: [
         ["date", "weight_kg"],
@@ -168,29 +168,61 @@ describe("importFromSheet", () => {
     const result = await importFromSheet({ sheets: sheets as never, spreadsheetId: "SHEET_ID" });
 
     expect(result.ok).toBe(true);
-    const sets = getSetsForSession(1, 1);
-    expect(sets.length).toBe(1);
-    expect(sets[0].exercise).toBe("Competition Squat");
-    expect(sets[0].actualWeight).toBe(100);
-
     const tms = getTrainingMaxes();
     expect(tms.squat?.trainingMax).toBe(162);
   });
 
-  it("is idempotent — re-importing the same row does not duplicate", async () => {
+  it("upserts actual set values from block tab rows", async () => {
     const { importFromSheet } = await import("@/lib/workout-sheets");
     const { getSetsForSession } = await import("@/lib/workout");
+
+    const key = WorkoutSheetWriter.makeKey(1, 1, 1, "Competition Squat");
     const data: Record<string, unknown[][]> = {
-      [TAB_SETS]: [
-        ["week", "day", "exercise", "set_number", "prescribed_weight", "prescribed_reps",
-         "prescribed_rpe", "actual_weight", "actual_reps", "actual_rpe", "e1rm", "logged_at"],
-        ["2", "1", "Bench Press", "1", "80", "5", "8", "82.5", "5", "8", "96.2", "2026-06-02T10:00:00Z"],
+      [CB16_BLOCKS[0].name]: [
+        WorkoutSheetWriter.HEADER,
+        [key, 1, 1, "Squat Focus", "Competition Squat", "Set 1 (Top)", "90kg × 5 @RPE7", 92.5, 5, 7.5, 107.3],
+      ],
+    };
+    const { sheets } = makeFakeSheets(data);
+
+    await importFromSheet({ sheets: sheets as never, spreadsheetId: "SHEET_ID" });
+
+    const sets = getSetsForSession(1, 1);
+    expect(sets.length).toBe(1);
+    expect(sets[0].exercise).toBe("Competition Squat");
+    expect(sets[0].actualWeight).toBe(92.5);
+    expect(sets[0].actualReps).toBe(5);
+  });
+
+  it("is idempotent — re-importing the same block row does not duplicate", async () => {
+    const { importFromSheet } = await import("@/lib/workout-sheets");
+    const { getSetsForSession } = await import("@/lib/workout");
+    const key = WorkoutSheetWriter.makeKey(2, 1, 1, "Competition Bench");
+    const data: Record<string, unknown[][]> = {
+      [CB16_BLOCKS[0].name]: [
+        WorkoutSheetWriter.HEADER,
+        [key, 2, 1, "Bench Focus", "Competition Bench", "Set 1", "80kg × 5 @RPE7", 82.5, 5, 8, 96],
       ],
     };
     const ctx = { sheets: makeFakeSheets(data).sheets as never, spreadsheetId: "SHEET_ID" };
     await importFromSheet(ctx);
     await importFromSheet(ctx);
     expect(getSetsForSession(2, 1).length).toBe(1);
+  });
+
+  it("skips separator rows silently", async () => {
+    const { importFromSheet } = await import("@/lib/workout-sheets");
+    const { getSetsForSession } = await import("@/lib/workout");
+    const data: Record<string, unknown[][]> = {
+      [CB16_BLOCKS[0].name]: [
+        WorkoutSheetWriter.HEADER,
+        ["", "", 1, "=== Day 1: Squat Focus ===", "", "", "", "", "", "", ""],
+        ["", 1, 1, "Squat Focus", "", "— Week 1 —", "", "", "", "", ""],
+      ],
+    };
+    const { sheets } = makeFakeSheets(data);
+    await importFromSheet({ sheets: sheets as never, spreadsheetId: "SHEET_ID" });
+    expect(getSetsForSession(1, 1).length).toBe(0);
   });
 });
 
