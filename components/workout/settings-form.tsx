@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { LiftId, TrainingMax } from "@/lib/workout";
+import type { LiftId, TrainingMax, TmHistoryEntry } from "@/lib/workout";
 
 const TM_FACTOR = 0.9;
 
@@ -14,12 +14,59 @@ function suggestTm(e1rm: string): string {
 
 type Entry = { e1rm: string; tm: string; tmTouched: boolean };
 
+function TmHistory({ entries }: { entries: TmHistoryEntry[] }) {
+  const [open, setOpen] = useState(false);
+  if (entries.length === 0) return null;
+  // Newest first, last 5.
+  const recent = [...entries].reverse().slice(0, 5);
+  return (
+    <div className="pt-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-xs text-[#8e8e93] hover:text-[#f5f5f5] transition-colors min-h-[32px] flex items-center gap-1"
+      >
+        History {open ? "▾" : "▸"}
+      </button>
+      {open && (
+        <ul className="mt-1 space-y-1">
+          {recent.map((e, i) => (
+            <li key={`${e.setAt}-${i}`} className="flex items-center justify-between text-xs">
+              <span className="text-[#8e8e93]">
+                {new Date(e.setAt).toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="text-[#f5f5f5] font-mono">{e.trainingMax} kg</span>
+                <span
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                    e.reason === "Auto"
+                      ? "bg-[#30d158]/15 text-[#30d158]"
+                      : "bg-[#2a3352] text-[#8e8e93]"
+                  }`}
+                >
+                  {e.reason}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsForm({
   lifts,
   currentTms,
+  history = {},
 }: {
   lifts: { id: LiftId; label: string }[];
   currentTms: Record<string, TrainingMax>;
+  history?: Record<string, TmHistoryEntry[]>;
 }) {
   const router = useRouter();
 
@@ -131,6 +178,7 @@ export default function SettingsForm({
                 />
               </label>
             </div>
+            <TmHistory entries={history[l.id] ?? []} />
           </div>
         );
       })}

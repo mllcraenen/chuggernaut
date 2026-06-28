@@ -130,7 +130,9 @@ export interface TrainingMaxInput {
 }
 
 // Append a new training-max row per lift. History is preserved.
-export function setTrainingMaxes(entries: TrainingMaxInput[]): void {
+// Returns the ISO timestamp stamped on the new rows (shared across the batch),
+// which callers use to tag autoregulation-sourced entries.
+export function setTrainingMaxes(entries: TrainingMaxInput[]): string {
   const db = getDb();
   const now = new Date().toISOString();
   const stmt = db.prepare(
@@ -139,6 +141,70 @@ export function setTrainingMaxes(entries: TrainingMaxInput[]): void {
   for (const e of entries) {
     stmt.run(e.lift, e.e1rm, e.trainingMax, now);
   }
+  return now;
+}
+
+// ----- Autoregulation tagging -----
+//
+// We cannot add a "reason" column without a migration, so entries created by
+// the autoregulation flow are tagged in a JSON log under workout_settings.
+// Each tag identifies a TM row by lift + trainingMax + setAt.
+
+const TM_AUTO_LOG_KEY = "tm_autoregulation_log";
+
+export interface TmAutoLogEntry {
+  lift: LiftId;
+  trainingMax: number;
+  setAt: string;
+}
+
+export function getTmAutoLog(): TmAutoLogEntry[] {
+  const raw = getSetting(TM_AUTO_LOG_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as TmAutoLogEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Tag the given lifts' TM rows (stamped at setAt) as autoregulation-sourced.
+export function appendTmAutoLog(entries: TmAutoLogEntry[]): void {
+  if (entries.length === 0) return;
+  const log = getTmAutoLog();
+  log.push(...entries);
+  setSetting(TM_AUTO_LOG_KEY, JSON.stringify(log));
+}
+
+export interface TmHistoryEntry {
+  trainingMax: number;
+  e1rm: number;
+  setAt: string;
+  reason: "Auto" | "Manual";
+}
+
+// Full TM history for a lift, oldest first, each tagged Auto or Manual based on
+// the autoregulation log.
+export function getTmHistory(lift: LiftId): TmHistoryEntry[] {
+  const rows = getDb()
+    .prepare(
+      "SELECT e1rm, training_max, set_at FROM workout_training_maxes WHERE lift = ? ORDER BY set_at ASC, id ASC"
+    )
+    .all<{ e1rm: number; training_max: number; set_at: string }>(lift);
+
+  const autoKeys = new Set(
+    getTmAutoLog()
+      .filter((e) => e.lift === lift)
+      .map((e) => `${e.trainingMax}@${e.setAt}`)
+  );
+
+  return rows.map((r) => ({
+    trainingMax: r.training_max,
+    e1rm: r.e1rm,
+    setAt: r.set_at,
+    reason: autoKeys.has(`${r.training_max}@${r.set_at}`) ? "Auto" : "Manual",
+  }));
 }
 
 // ----- Sessions -----
