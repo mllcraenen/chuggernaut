@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { listSessions, startSession } from "@/lib/workout";
+import { triggerExportIfDue } from "@/lib/workout-sheets";
 
 export const dynamic = "force-dynamic";
 
@@ -30,5 +31,7 @@ export async function POST(request: NextRequest) {
   const wd = validWeekDay(body?.week, body?.day);
   if (!wd) return NextResponse.json({ error: "invalid week/day" }, { status: 400 });
 
-  return NextResponse.json(startSession(wd.week, wd.day), { status: 201 });
+  const result = NextResponse.json(startSession(wd.week, wd.day), { status: 201 });
+  triggerExportIfDue();
+  return result;
 }

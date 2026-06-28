@@ -1,5 +1,6 @@
 import { getDb } from "./workout-db";
 import { PROGRAM } from "./workout-program";
+import { markDirty } from "./sheets-sync";
 
 // ----- Key-value settings -----
 
@@ -139,6 +140,7 @@ export function setTrainingMaxes(entries: TrainingMaxInput[]): void {
   for (const e of entries) {
     stmt.run(e.lift, e.e1rm, e.trainingMax, now);
   }
+  markDirty();
 }
 
 // ----- Sessions -----
@@ -200,6 +202,7 @@ export function completeSession(week: number, day: number): SessionRow {
       "UPDATE workout_sessions SET completed_at = ? WHERE week = ? AND day = ?"
     )
     .run(now, week, day);
+  markDirty();
   return getSession(week, day)!;
 }
 
@@ -207,6 +210,7 @@ export function uncompleteSession(week: number, day: number): SessionRow | null 
   getDb()
     .prepare("UPDATE workout_sessions SET completed_at = NULL WHERE week = ? AND day = ?")
     .run(week, day);
+  markDirty();
   return getSession(week, day);
 }
 
@@ -527,6 +531,7 @@ export function createSwap(
   const row = getDb()
     .prepare("SELECT * FROM workout_swaps WHERE original_exercise = ? ORDER BY id DESC LIMIT 1")
     .get<SwapDbRow>(originalExercise)!;
+  markDirty();
   return mapSwap(row);
 }
 
@@ -534,6 +539,7 @@ export function clearSwap(originalExercise: string, week: number, day: number): 
   getDb()
     .prepare("DELETE FROM workout_swaps WHERE original_exercise = ? AND ((scope = 'day' AND week = ? AND day = ?) OR scope = 'block')")
     .run(originalExercise, week, day);
+  markDirty();
 }
 
 // ----- Notes -----
@@ -646,6 +652,7 @@ export function logSet(input: LogSetInput): SetRow {
       "SELECT * FROM workout_sets WHERE week = ? AND day = ? AND exercise = ? AND set_number = ?"
     )
     .get<SetDbRow>(input.week, input.day, input.exercise, input.setNumber)!;
+  markDirty();
   return mapSet(saved);
 }
 
@@ -663,6 +670,7 @@ export function logBodyWeight(date: string, weightKg: number): void {
       "INSERT INTO workout_body_weight (date, weight_kg) VALUES (?, ?) ON CONFLICT(date) DO UPDATE SET weight_kg = excluded.weight_kg"
     )
     .run(date, weightKg);
+  markDirty();
 }
 
 // Full body-weight history, oldest first.
@@ -677,5 +685,6 @@ export function deleteBodyWeight(date: string): boolean {
   const result = getDb()
     .prepare("DELETE FROM workout_body_weight WHERE date = ?")
     .run(date);
+  if (result.changes > 0) markDirty();
   return result.changes > 0;
 }

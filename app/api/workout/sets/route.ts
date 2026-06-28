@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { logSet, deleteSet, type LogSetInput } from "@/lib/workout";
+import { triggerExportIfDue } from "@/lib/workout-sheets";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +63,9 @@ export async function POST(request: NextRequest) {
     prescribedRpe: optNum(body.prescribedRpe),
   };
 
-  return NextResponse.json(logSet(input), { status: 201 });
+  const result = NextResponse.json(logSet(input), { status: 201 });
+  triggerExportIfDue();
+  return result;
 }
 
 // DELETE ?week=&day=&exercise=&setNumber=
@@ -84,5 +87,6 @@ export async function DELETE(request: NextRequest) {
 
   const deleted = deleteSet(week, day, exercise, setNumber);
   if (!deleted) return NextResponse.json({ error: "not found" }, { status: 404 });
+  triggerExportIfDue();
   return NextResponse.json({ ok: true });
 }

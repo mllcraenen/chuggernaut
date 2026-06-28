@@ -7,7 +7,7 @@ import { getTrainingMaxes, getGoalDate, getSetting, LIFTS } from "@/lib/workout"
 import BarWeightSelector from "@/components/workout/bar-weight-selector";
 import GoalDateForm from "@/components/workout/goal-date-form";
 import SheetsSyncForm from "@/components/workout/sheets-sync-form";
-import { getStatus, SETTING_SPREADSHEET_ID } from "@/lib/workout-sheets";
+import { getStatus, SETTING_SPREADSHEET_ID, importIfStale } from "@/lib/workout-sheets";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -15,6 +15,8 @@ export const revalidate = 0;
 export default async function WorkoutSettingsPage() {
   const session = await auth();
   if (!session) redirect("/login");
+
+  await importIfStale();
 
   const tms = getTrainingMaxes();
   const goalDate = getGoalDate();
@@ -59,6 +61,7 @@ export default async function WorkoutSettingsPage() {
             <SheetsSyncForm
               configured={sheetsStatus.configured}
               lastSync={sheetsStatus.lastSync}
+              lastImport={sheetsStatus.lastImport}
               spreadsheetId={spreadsheetId}
             />
           </div>

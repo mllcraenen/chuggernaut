@@ -20,16 +20,19 @@ function timeAgo(iso: string): string {
 export default function SheetsSyncForm({
   configured,
   lastSync,
+  lastImport,
   spreadsheetId,
 }: {
   configured: boolean;
   lastSync: string | null;
+  lastImport: string | null;
   spreadsheetId: string;
 }) {
   const [creds, setCreds] = useState("");
   const [sheetId, setSheetId] = useState(spreadsheetId);
   const [isConfigured, setIsConfigured] = useState(configured);
   const [syncedAt, setSyncedAt] = useState<string | null>(lastSync);
+  const [importedAt, setImportedAt] = useState<string | null>(lastImport);
   const [state, setState] = useState<SyncState>("idle");
   const [message, setMessage] = useState<string | null>(null);
 
@@ -62,6 +65,7 @@ export default function SheetsSyncForm({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error ?? `Failed (${res.status})`);
       if (data?.lastSync) setSyncedAt(data.lastSync);
+      if (direction === "import" && data?.lastSync) setImportedAt(data.lastSync);
       setState("idle");
       setMessage(direction === "export" ? "Exported to sheet" : "Imported from sheet");
     } catch (e) {
@@ -141,8 +145,9 @@ export default function SheetsSyncForm({
       </div>
 
       <div className="flex items-center justify-between text-xs">
-        <span className="text-[#8e8e93]">
-          {syncedAt ? `Last sync: ${timeAgo(syncedAt)}` : "Never synced"}
+        <span className="text-[#8e8e93] space-y-0.5">
+          <span className="block">{syncedAt ? `Exported: ${timeAgo(syncedAt)}` : "Never exported"}</span>
+          <span className="block">{importedAt ? `Imported: ${timeAgo(importedAt)}` : "Never imported"}</span>
         </span>
         {message && (
           <span className={state === "error" ? "text-[#e84545]" : "text-[#30d158]"}>{message}</span>

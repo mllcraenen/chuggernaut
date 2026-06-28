@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { isOnboarded, getE1rmHistory, getCompletedSessions, getBodyWeightHistory, LIFTS } from "@/lib/workout";
 import WorkoutTabBar from "@/components/workout/workout-tab-bar";
+import { importIfStale } from "@/lib/workout-sheets";
 import E1rmChart from "@/components/workout/e1rm-chart";
 import BodyWeightSection from "@/components/workout/body-weight-section";
 
@@ -12,6 +13,8 @@ export default async function HistoryPage() {
   const session = await auth();
   if (!session) redirect("/login");
   if (!isOnboarded()) redirect("/workout");
+
+  await importIfStale();
 
   const e1rmHistory = Object.fromEntries(
     LIFTS.map((l) => [l.id, getE1rmHistory(l.id)])

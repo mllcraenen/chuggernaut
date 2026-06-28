@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
+import { triggerExportIfDue } from "@/lib/workout-sheets";
 import {
   completeSession,
   uncompleteSession,
@@ -49,13 +50,19 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json().catch(() => null);
   const action = body?.action ?? "complete";
   if (action === "start") {
-    return NextResponse.json(startSession(wd.week, wd.day));
+    const r = NextResponse.json(startSession(wd.week, wd.day));
+    triggerExportIfDue();
+    return r;
   }
   if (action === "complete") {
-    return NextResponse.json(completeSession(wd.week, wd.day));
+    const r = NextResponse.json(completeSession(wd.week, wd.day));
+    triggerExportIfDue();
+    return r;
   }
   if (action === "uncomplete") {
-    return NextResponse.json(uncompleteSession(wd.week, wd.day));
+    const r = NextResponse.json(uncompleteSession(wd.week, wd.day));
+    triggerExportIfDue();
+    return r;
   }
   return NextResponse.json({ error: "invalid action" }, { status: 400 });
 }

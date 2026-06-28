@@ -6,6 +6,7 @@ import OnboardingForm from "@/components/workout/onboarding-form";
 import ProgramOverview from "@/components/workout/program-overview";
 import WorkoutTabBar from "@/components/workout/workout-tab-bar";
 import { PROGRAM_WEEKS, PROGRAM_DAYS } from "@/lib/workout-program";
+import { importIfStale } from "@/lib/workout-sheets";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -13,6 +14,8 @@ export const revalidate = 0;
 export default async function WorkoutPage() {
   const session = await auth();
   if (!session) redirect("/login");
+
+  await importIfStale();
 
   const onboarded = isOnboarded();
   const tms = getTrainingMaxes();
