@@ -8,6 +8,8 @@ import { UnitProvider, useUnit } from "@/components/workout/unit-context";
 import { kgToDisplay, displayToKg, unitLabel, KG_TO_LBS } from "@/lib/units";
 import type { Unit } from "@/lib/units";
 import { calculatePlates } from "@/lib/plate-calculator";
+import AutoregulateSheet from "@/components/workout/autoregulate-sheet";
+import type { AdjustmentSuggestion } from "@/lib/autoregulation";
 
 // ----- Types (shared with the server page) -----
 
@@ -101,6 +103,8 @@ function SessionInner({
   const [completedAt, setCompletedAt] = useState<string | null>(initialCompletedAt);
   const [finishing, setFinishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<AdjustmentSuggestion[]>([]);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [barKg, setBarKg] = useState<number>(20);
   const [notes, setNotes] = useState<Record<string, string>>(initialNotes);
 
@@ -176,11 +180,9 @@ function SessionInner({
     [startRest]
   );
 
-  async function toggleFinish() {
-    setFinishing(true);
-    setError(null);
-    const action = completedAt ? "uncomplete" : "complete";
-    try {
+  // Mark the session complete (or undo) on the server and refresh.
+  const finalizeSession = useCallback(
+    async (action: "complete" | "uncomplete") => {
       const res = await fetch(`/api/workout/sessions/${week}/${day}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -195,6 +197,90 @@ function SessionInner({
         fetch("/api/workout/sheets/export", { method: "POST" }).catch(() => {});
       }
       router.refresh();
+    },
+    [week, day, router]
+  );
+
+  // Persist accepted TM suggestions, then mark the session complete. Other
+  // lifts keep their current TM so the (all-four) endpoint stays satisfied.
+  const applyAdjustments = useCallback(
+    async (acceptedLifts: LiftId[]) => {
+      setSheetOpen(false);
+      setFinishing(true);
+      setError(null);
+      try {
+        if (acceptedLifts.length > 0) {
+          const tmRes = await fetch("/api/workout/training-maxes");
+          if (tmRes.ok) {
+            const tmData = await tmRes.json();
+            const current = (tmData?.trainingMaxes ?? {}) as Record<
+              string,
+              { lift: LiftId; e1rm: number; trainingMax: number }
+            >;
+            const suggMap = new Map(suggestions.map((s) => [s.lift, s.suggestedTm]));
+            const acceptedSet = new Set(acceptedLifts);
+            const maxes = Object.values(current).map((cur) => {
+              if (acceptedSet.has(cur.lift) && suggMap.has(cur.lift)) {
+                const tm = suggMap.get(cur.lift)!;
+                return {
+                  lift: cur.lift,
+                  e1rm: Math.round((tm / 0.9) * 10) / 10,
+                  trainingMax: tm,
+                };
+              }
+              return { lift: cur.lift, e1rm: cur.e1rm, trainingMax: cur.trainingMax };
+            });
+            await fetch("/api/workout/training-maxes", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ maxes, autoLifts: acceptedLifts }),
+            });
+          }
+        }
+        await finalizeSession("complete");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not update session");
+      } finally {
+        setFinishing(false);
+      }
+    },
+    [suggestions, finalizeSession]
+  );
+
+  async function toggleFinish() {
+    setError(null);
+    // Undo path — no autoregulation involved.
+    if (completedAt) {
+      setFinishing(true);
+      try {
+        await finalizeSession("uncomplete");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not update session");
+      } finally {
+        setFinishing(false);
+      }
+      return;
+    }
+
+    // Complete path — first ask the server for TM suggestions.
+    setFinishing(true);
+    try {
+      const res = await fetch("/api/workout/autoregulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ week, day }),
+      });
+      const data = res.ok ? await res.json().catch(() => null) : null;
+      const next: AdjustmentSuggestion[] = Array.isArray(data?.suggestions)
+        ? data.suggestions
+        : [];
+      if (next.length > 0) {
+        setSuggestions(next);
+        setSheetOpen(true);
+        setFinishing(false);
+        return; // wait for the user's decision in the sheet
+      }
+      await finalizeSession("complete");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not update session");
     } finally {
@@ -319,6 +405,11 @@ function SessionInner({
           </span>
           <span className="text-xs uppercase tracking-widest opacity-80">tap to dismiss</span>
         </button>
+      )}
+
+      {/* Post-session TM autoregulation suggestions */}
+      {sheetOpen && (
+        <AutoregulateSheet suggestions={suggestions} onApply={applyAdjustments} />
       )}
     </main>
   );

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import SettingsForm from "@/components/workout/settings-form";
 import WorkoutTabBar from "@/components/workout/workout-tab-bar";
 import UnitToggle from "@/components/workout/unit-toggle";
-import { getTrainingMaxes, getGoalDate, getSetting, LIFTS } from "@/lib/workout";
+import { getTrainingMaxes, getGoalDate, getSetting, getTmHistory, LIFTS, type TmHistoryEntry } from "@/lib/workout";
 import BarWeightSelector from "@/components/workout/bar-weight-selector";
 import GoalDateForm from "@/components/workout/goal-date-form";
 import SheetsSyncForm from "@/components/workout/sheets-sync-form";
@@ -19,6 +19,9 @@ export default async function WorkoutSettingsPage() {
   await importIfStale();
 
   const tms = getTrainingMaxes();
+  const tmHistory: Record<string, TmHistoryEntry[]> = Object.fromEntries(
+    LIFTS.map((l) => [l.id, getTmHistory(l.id)])
+  );
   const goalDate = getGoalDate();
   const sheetsStatus = getStatus();
   const spreadsheetId = getSetting(SETTING_SPREADSHEET_ID) ?? "";
@@ -45,7 +48,7 @@ export default async function WorkoutSettingsPage() {
             </p>
           </div>
 
-          <SettingsForm lifts={LIFTS} currentTms={tms} />
+          <SettingsForm lifts={LIFTS} currentTms={tms} history={tmHistory} />
 
           <div>
             <h2 className="text-base font-semibold mb-3">Preferences</h2>

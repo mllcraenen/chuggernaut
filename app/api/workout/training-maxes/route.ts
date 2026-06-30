@@ -7,8 +7,10 @@ import {
   getTrainingMaxes,
   isOnboarded,
   setTrainingMaxes,
+  appendTmAutoLog,
   isLiftId,
   type TrainingMaxInput,
+  type LiftId,
 } from "@/lib/workout";
 
 export const dynamic = "force-dynamic";
@@ -70,7 +72,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  setTrainingMaxes(entries);
+  const setAt = setTrainingMaxes(entries);
+
+  // Tag any autoregulation-sourced lifts so settings can label them "Auto".
+  const autoRaw = body?.autoLifts;
+  if (Array.isArray(autoRaw)) {
+    const autoLifts = new Set(autoRaw.filter((l): l is LiftId => isLiftId(l)));
+    const tags = entries
+      .filter((e) => autoLifts.has(e.lift))
+      .map((e) => ({ lift: e.lift, trainingMax: e.trainingMax, setAt }));
+    appendTmAutoLog(tags);
+  }
 
   const result = NextResponse.json(
     { onboarded: isOnboarded(), trainingMaxes: getTrainingMaxes() },
