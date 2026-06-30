@@ -64,6 +64,16 @@ CREATE TABLE IF NOT EXISTS workout_body_weight (
   weight_kg REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS workout_notes (
+  id INTEGER PRIMARY KEY,
+  week INTEGER NOT NULL,
+  day INTEGER NOT NULL,
+  exercise TEXT NOT NULL,
+  note TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(week, day, exercise)
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_week_day
   ON workout_sessions(week, day);
 CREATE INDEX IF NOT EXISTS idx_sets_week_day
