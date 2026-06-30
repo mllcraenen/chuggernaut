@@ -1,5 +1,7 @@
 import { getDb } from "./workout-db";
-import { getSetting, setSetting } from "./workout";
+import { getSetting, setSetting, getTrainingMaxes } from "./workout";
+import { PROGRAM } from "./workout-program";
+import { isDirty, clearDirty, markDirty } from "./sheets-sync";
 
 // ---------------------------------------------------------------------------
 // Google Sheets bidirectional sync for the workout tool.
@@ -15,7 +17,9 @@ import { getSetting, setSetting } from "./workout";
 export const SETTING_CREDENTIALS = "sheets_credentials";
 export const SETTING_SPREADSHEET_ID = "sheets_spreadsheet_id";
 export const SETTING_LAST_SYNC = "sheets_last_sync";
+export const SETTING_LAST_IMPORT = "sheets_last_import";
 
+export const TAB_PROGRAM = "Program";
 export const TAB_TRAINING_MAXES = "Training Maxes";
 export const TAB_SESSIONS = "Sessions";
 export const TAB_SETS = "Sets";
@@ -24,6 +28,10 @@ export const TAB_SWAPS = "Swaps";
 
 // Header row for every tab. Export order follows this object's key order.
 export const TAB_HEADERS: Record<string, string[]> = {
+  [TAB_PROGRAM]: [
+    "week", "day", "day_label", "exercise", "set_number",
+    "lift", "prescribed_pct", "prescribed_weight_kg", "prescribed_reps", "prescribed_rpe", "note",
+  ],
   [TAB_TRAINING_MAXES]: ["lift", "e1rm", "training_max", "set_at"],
   [TAB_SESSIONS]: ["week", "day", "started_at", "completed_at"],
   [TAB_SETS]: [
@@ -52,7 +60,9 @@ export const TAB_HEADERS: Record<string, string[]> = {
   ],
 };
 
+// Program tab is first so it's the landing view in the sheet.
 const TAB_ORDER = [
+  TAB_PROGRAM,
   TAB_TRAINING_MAXES,
   TAB_SESSIONS,
   TAB_SETS,
@@ -100,12 +110,14 @@ export function isConfigured(): boolean {
 export interface SyncStatus {
   configured: boolean;
   lastSync: string | null;
+  lastImport: string | null;
 }
 
 export function getStatus(): SyncStatus {
   return {
     configured: isConfigured(),
     lastSync: getSetting(SETTING_LAST_SYNC),
+    lastImport: getSetting(SETTING_LAST_IMPORT),
   };
 }
 
@@ -149,6 +161,35 @@ function cell(v: unknown): string | number {
 function readTabRows(tab: string): (string | number)[][] {
   const db = getDb();
   switch (tab) {
+    case TAB_PROGRAM: {
+      const tms = getTrainingMaxes();
+      const rows: (string | number)[][] = [];
+      for (const programDay of PROGRAM) {
+        for (const exercise of programDay.exercises) {
+          for (const set of exercise.sets) {
+            const pct = set.percentOfTM;
+            let weight: number | "" = "";
+            if (pct !== null && exercise.lift && tms[exercise.lift]) {
+              weight = Math.round(tms[exercise.lift].trainingMax * pct / 100 * 2) / 2;
+            }
+            rows.push([
+              cell(programDay.week),
+              cell(programDay.day),
+              cell(programDay.label),
+              cell(exercise.name),
+              cell(set.setNumber),
+              cell(exercise.lift ?? ""),
+              cell(pct ?? ""),
+              cell(weight),
+              cell(set.reps),
+              cell(set.rpe ?? ""),
+              cell(set.note ?? ""),
+            ]);
+          }
+        }
+      }
+      return rows;
+    }
     case TAB_TRAINING_MAXES: {
       const rows = db
         .prepare("SELECT lift, e1rm, training_max, set_at FROM workout_training_maxes ORDER BY id ASC")
@@ -400,11 +441,13 @@ export interface ImportResult {
 }
 
 // Sheet -> DB. Read each tab, skip header, upsert into the matching table.
+// Program tab is skipped on import (it's export-only / derived from DB).
 export async function importFromSheet(ctx?: SheetsContext): Promise<ImportResult> {
   const context = ctx ?? (await getSheetsContext());
 
   const rowsByTab: Record<string, number> = {};
   for (const tab of TAB_ORDER) {
+    if (tab === TAB_PROGRAM) continue; // export-only
     let values: unknown[][] = [];
     try {
       const res = await context.sheets.spreadsheets.values.get({
@@ -423,4 +466,37 @@ export async function importFromSheet(ctx?: SheetsContext): Promise<ImportResult
   const lastSync = new Date().toISOString();
   setSetting(SETTING_LAST_SYNC, lastSync);
   return { ok: true, rowsByTab, lastSync };
+}
+
+// ----- Auto-sync helpers -----
+
+// Fire-and-forget export after any write. Debounced to at most once per 60s.
+// Safe to call synchronously from route handlers — never awaited.
+export function triggerExportIfDue(): void {
+  if (!isConfigured()) return;
+  if (!isDirty()) return;
+  const lastSync = getSetting(SETTING_LAST_SYNC);
+  if (lastSync) {
+    const age = Date.now() - new Date(lastSync).getTime();
+    if (age < 60_000) return; // debounce
+  }
+  clearDirty();
+  exportToSheet().catch(() => markDirty()); // restore dirty flag on failure
+}
+
+// Called from page server components. Imports from sheet if > 15 min stale.
+// Never throws — sheet errors must not break page renders.
+export async function importIfStale(): Promise<void> {
+  if (!isConfigured()) return;
+  const lastImport = getSetting(SETTING_LAST_IMPORT);
+  if (lastImport) {
+    const age = Date.now() - new Date(lastImport).getTime();
+    if (age < 15 * 60 * 1000) return;
+  }
+  try {
+    await importFromSheet();
+    setSetting(SETTING_LAST_IMPORT, new Date().toISOString());
+  } catch {
+    // silent — sheet errors must not block page render
+  }
 }

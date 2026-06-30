@@ -39,6 +39,7 @@ beforeEach(async () => {
 // ---- Fake Sheets client ----
 
 import {
+  TAB_PROGRAM,
   TAB_TRAINING_MAXES,
   TAB_SESSIONS,
   TAB_SETS,
@@ -46,7 +47,8 @@ import {
   TAB_SWAPS,
 } from "@/lib/workout-sheets";
 
-const ALL_TABS = [TAB_TRAINING_MAXES, TAB_SESSIONS, TAB_SETS, TAB_BODY_WEIGHT, TAB_SWAPS];
+// TAB_PROGRAM is export-only — it appears in clears+updates but not in import upsert counts.
+const ALL_TABS = [TAB_PROGRAM, TAB_TRAINING_MAXES, TAB_SESSIONS, TAB_SETS, TAB_BODY_WEIGHT, TAB_SWAPS];
 
 function makeFakeSheets(getData: Record<string, unknown[][]> = {}) {
   const updates: { range: string; values: unknown[][] }[] = [];

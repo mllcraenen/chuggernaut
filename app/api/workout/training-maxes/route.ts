@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
+import { triggerExportIfDue } from "@/lib/workout-sheets";
 import {
   LIFTS,
   TM_FACTOR,
@@ -83,8 +84,10 @@ export async function POST(request: NextRequest) {
     appendTmAutoLog(tags);
   }
 
-  return NextResponse.json(
+  const result = NextResponse.json(
     { onboarded: isOnboarded(), trainingMaxes: getTrainingMaxes() },
     { status: 201 }
   );
+  triggerExportIfDue();
+  return result;
 }

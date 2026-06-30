@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { logBodyWeight, getBodyWeightHistory, deleteBodyWeight } from "@/lib/workout";
+import { triggerExportIfDue } from "@/lib/workout-sheets";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,7 @@ export async function POST(request: NextRequest) {
   }
 
   logBodyWeight(date, weightKg);
+  triggerExportIfDue();
   return NextResponse.json({ ok: true }, { status: 201 });
 }
 
@@ -53,5 +55,6 @@ export async function DELETE(request: NextRequest) {
 
   const deleted = deleteBodyWeight(date);
   if (!deleted) return NextResponse.json({ error: "not found" }, { status: 404 });
+  triggerExportIfDue();
   return NextResponse.json({ ok: true });
 }

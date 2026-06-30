@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { createSwap, clearSwap } from "@/lib/workout";
+import { triggerExportIfDue } from "@/lib/workout-sheets";
 import { blockEndWeek, getAlternatives } from "@/lib/exercise-alternatives";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,7 @@ export async function POST(req: NextRequest) {
 
   const endWeek = scope === "block" ? blockEndWeek(week) : null;
   const swap = createSwap(originalExercise, replacementExercise, scope, week, day, endWeek);
+  triggerExportIfDue();
   return NextResponse.json(swap, { status: 201 });
 }
 
@@ -41,6 +43,7 @@ export async function DELETE(req: NextRequest) {
   }
 
   clearSwap(originalExercise, week, day);
+  triggerExportIfDue();
   return NextResponse.json({ ok: true });
 }
 
