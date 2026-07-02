@@ -28,7 +28,7 @@ curl -s -H "X-Internal-Token: chuggernaut-internal" "http://localhost:3003/api/i
 curl -s -H "X-Internal-Token: chuggernaut-internal" "http://localhost:3003/api/internal/sync?action=import"
 ```
 
-**Known pre-existing failure:** `__tests__/files.test.ts` imports `../lib/files`, a module that was never carried over from `tools-portal` during extraction. It fails to even load. Do not try to fix by writing a `lib/files.ts` — the file-upload feature it tests isn't part of this app; either delete the test or leave it failing.
+**Known failing tests (program-swap fallout):** the warmup label test and several sheet-writer/workout-sheets tests still assert the old Calgary Barbell program's exercise names, labels, and 16-week block layout; the current program is the 6-week Monolith Meet Prep. These are tracked in `ROADMAP.md` Phase 1 (items 1.4, 1.8) — fix them with program-agnostic assertions, not by re-hardcoding the new names.
 
 ## Architecture
 
@@ -50,6 +50,8 @@ Tabs are block tabs (one per 4-week block, generated from `CB16_BLOCKS`/`BlockDe
 **Internal sync route (`app/api/internal/sync/route.ts`)** bypasses Auth.js entirely via a hardcoded `X-Internal-Token` header check — this is safe only because port 3003 has no Caddy entry and is not reachable off the VPS. `middleware.ts` explicitly excludes `/api/internal` from the auth gate for this reason.
 
 **Client/server split for sessions.** `app/workout/session/[week]/[day]/page.tsx` (server) resolves program data, swaps, notes, and previous-session numbers, then hands a plain-data props object to `components/workout/session-client.tsx` ("use client") which owns all interactive logging state, unit conversion (`lib/units.ts`, kg is canonical storage unit, lbs is display-only via `UnitProvider`/`unit-context.tsx`), and plate math (`lib/plate-calculator.ts`).
+
+**Autoregulation (`lib/autoregulation.ts`).** Pure functions, no DB access: a standard RPE table backs out an implied training max per lift from prescribed-vs-reported RPE on logged sets, weighted toward the top set, damped (0.6) and capped (±5 %/session). Post-session, `components/workout/autoregulate-sheet.tsx` presents the suggestions for explicit approval; applied changes are tagged in a JSON log under the `workout_settings` key `tm_autoregulation_log`.
 
 **Exercise swaps** (`lib/exercise-alternatives.ts` for suggested alternatives, `workout_swaps` table via `createSwap`/`getActiveSwap`/`clearSwap`) let a lifter substitute an exercise for either a single day or the rest of a block; `getSwapsForSession` resolves which swap (if any) applies to a given week/day/exercise at read time — the program definition itself is never mutated.
 
