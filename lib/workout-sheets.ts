@@ -67,7 +67,7 @@ export const BLOCK_TAB_NAMES = new Set(CB16_BLOCKS.map(b => b.name));
 export interface SheetsApi {
   spreadsheets: {
     get(params: { spreadsheetId: string }): Promise<{
-      data: { sheets?: { properties?: { title?: string } }[] };
+      data: { sheets?: { properties?: { title?: string; sheetId?: number } }[] };
     }>;
     batchUpdate(params: {
       spreadsheetId: string;
@@ -333,25 +333,201 @@ function upsertTabRows(tab: string, rows: unknown[][]): number {
   }
 }
 
+// ----- Formatting -----
+
+type Color = { red: number; green: number; blue: number };
+const rgb = (r: number, g: number, b: number): Color => ({ red: r / 255, green: g / 255, blue: b / 255 });
+
+// Calgary Barbell palette
+const C = {
+  HEADER_BG:  rgb(30,  60,  114),  // deep navy
+  DAY_BG:     rgb(45,  85,  155),  // medium blue
+  WEEK_BG:    rgb(197, 210, 235),  // pale blue
+  WHITE:      rgb(255, 255, 255),
+  DARK:       rgb(33,  33,  33),
+  KEY_GRAY:   rgb(200, 200, 200),  // near-invisible key column text
+  ACTUAL_BG:  rgb(255, 253, 220),  // light yellow — "fill me in"
+  HEADER_SM:  rgb(60,  90,  150),  // non-block tab header
+};
+
+function cellFmt(bg: Color, fg: Color, bold = false, fontSize = 10) {
+  return {
+    userEnteredFormat: {
+      backgroundColor: bg,
+      textFormat: { bold, foregroundColor: fg, fontSize },
+    },
+  };
+}
+
+async function applyBlockFormatting(
+  ctx: SheetsContext,
+  sheetId: number,
+  rows: (string | number)[][],  // raw rows from generateBlock (header NOT prepended)
+): Promise<void> {
+  const requests: unknown[] = [];
+  const totalRows = rows.length + 1; // +1 for header row
+
+  // Header row (index 0): bold navy
+  requests.push({ repeatCell: {
+    range: { sheetId, startRowIndex: 0, endRowIndex: 1 },
+    cell: cellFmt(C.HEADER_BG, C.WHITE, true, 10),
+    fields: "userEnteredFormat(backgroundColor,textFormat)",
+  }});
+
+  // Iterate data rows (offset by 1 for the header)
+  for (let i = 0; i < rows.length; i++) {
+    const ri = i + 1;
+    const row = rows[i];
+    const key = String(row[0] ?? "");
+    const col3 = String(row[3] ?? "");
+    const col5 = String(row[5] ?? "");
+
+    if (key === "" && col3.startsWith("=== Day")) {
+      requests.push({ repeatCell: {
+        range: { sheetId, startRowIndex: ri, endRowIndex: ri + 1 },
+        cell: cellFmt(C.DAY_BG, C.WHITE, true, 10),
+        fields: "userEnteredFormat(backgroundColor,textFormat)",
+      }});
+    } else if (key === "" && col5.startsWith("— Week")) {
+      requests.push({ repeatCell: {
+        range: { sheetId, startRowIndex: ri, endRowIndex: ri + 1 },
+        cell: cellFmt(C.WEEK_BG, C.DARK, true, 9),
+        fields: "userEnteredFormat(backgroundColor,textFormat)",
+      }});
+    }
+  }
+
+  // Key column (A): tiny gray text throughout data rows
+  requests.push({ repeatCell: {
+    range: { sheetId, startRowIndex: 1, endRowIndex: totalRows, startColumnIndex: 0, endColumnIndex: 1 },
+    cell: { userEnteredFormat: { textFormat: { foregroundColor: C.KEY_GRAY, fontSize: 7 } } },
+    fields: "userEnteredFormat(textFormat)",
+  }});
+
+  // Actual columns H, I, J (indices 7, 8, 9): light yellow
+  requests.push({ repeatCell: {
+    range: { sheetId, startRowIndex: 1, endRowIndex: totalRows, startColumnIndex: 7, endColumnIndex: 10 },
+    cell: { userEnteredFormat: { backgroundColor: C.ACTUAL_BG } },
+    fields: "userEnteredFormat(backgroundColor)",
+  }});
+
+  // Column widths (pixels)
+  const colWidths: [number, number, number][] = [
+    [0, 1, 65],   // _key
+    [1, 2, 50],   // Week
+    [2, 3, 40],   // Day
+    [3, 4, 110],  // Session
+    [4, 5, 210],  // Exercise
+    [5, 6, 140],  // Set
+    [6, 7, 155],  // Prescribed
+    [7, 8, 120],  // Actual Weight
+    [8, 9, 95],   // Actual Reps
+    [9, 10, 65],  // RPE
+    [10, 11, 80], // e1RM
+  ];
+  for (const [start, end, px] of colWidths) {
+    requests.push({ updateDimensionProperties: {
+      range: { sheetId, dimension: "COLUMNS", startIndex: start, endIndex: end },
+      properties: { pixelSize: px },
+      fields: "pixelSize",
+    }});
+  }
+
+  // Freeze header row
+  requests.push({ updateSheetProperties: {
+    properties: { sheetId, gridProperties: { frozenRowCount: 1 } },
+    fields: "gridProperties.frozenRowCount",
+  }});
+
+  await ctx.sheets.spreadsheets.batchUpdate({
+    spreadsheetId: ctx.spreadsheetId,
+    requestBody: { requests },
+  });
+}
+
+async function applySimpleHeaderFormat(ctx: SheetsContext, sheetId: number): Promise<void> {
+  await ctx.sheets.spreadsheets.batchUpdate({
+    spreadsheetId: ctx.spreadsheetId,
+    requestBody: {
+      requests: [{
+        repeatCell: {
+          range: { sheetId, startRowIndex: 0, endRowIndex: 1 },
+          cell: cellFmt(C.HEADER_SM, C.WHITE, true, 10),
+          fields: "userEnteredFormat(backgroundColor,textFormat)",
+        },
+      }],
+    },
+  });
+}
+
 // ----- Tab management -----
 
-// Ensure every required tab exists; create missing ones via batchUpdate.
-async function ensureTabs(ctx: SheetsContext): Promise<void> {
+// Ensure the sheet has exactly the tabs in TAB_ORDER, in that order.
+// Deletes stale tabs, adds missing ones, then reorders to match TAB_ORDER.
+// Returns a map of tab name → numeric sheetId (needed for formatting).
+async function ensureTabs(ctx: SheetsContext): Promise<Map<string, number>> {
   const meta = await ctx.sheets.spreadsheets.get({ spreadsheetId: ctx.spreadsheetId });
-  const existing = new Set(
-    (meta.data.sheets ?? [])
-      .map((s) => s.properties?.title)
-      .filter((t): t is string => Boolean(t))
-  );
-  const requests = TAB_ORDER.filter((t) => !existing.has(t)).map((title) => ({
-    addSheet: { properties: { title } },
-  }));
-  if (requests.length > 0) {
+  const sheetMeta = meta.data.sheets ?? [];
+  const tabOrderSet = new Set(TAB_ORDER);
+
+  // 1. Delete stale tabs (exist in sheet but NOT in our TAB_ORDER)
+  const staleSheets = sheetMeta.filter(s => {
+    const title = s.properties?.title;
+    return title && !tabOrderSet.has(title);
+  });
+  if (staleSheets.length > 0) {
     await ctx.sheets.spreadsheets.batchUpdate({
       spreadsheetId: ctx.spreadsheetId,
-      requestBody: { requests },
+      requestBody: {
+        requests: staleSheets
+          .filter(s => s.properties?.sheetId != null)
+          .map(s => ({ deleteSheet: { sheetId: s.properties!.sheetId! } })),
+      },
     });
   }
+
+  // 2. Add missing tabs
+  const existingTitles = new Set(sheetMeta.map(s => s.properties?.title).filter(Boolean));
+  const missing = TAB_ORDER.filter(t => !existingTitles.has(t));
+  if (missing.length > 0) {
+    await ctx.sheets.spreadsheets.batchUpdate({
+      spreadsheetId: ctx.spreadsheetId,
+      requestBody: {
+        requests: missing.map(title => ({ addSheet: { properties: { title } } })),
+      },
+    });
+  }
+
+  // 3. Re-fetch to get fresh sheetIds, then reorder to match TAB_ORDER
+  const fresh = await ctx.sheets.spreadsheets.get({ spreadsheetId: ctx.spreadsheetId });
+  const idMap = new Map<string, number>();
+  for (const s of fresh.data.sheets ?? []) {
+    const title = s.properties?.title;
+    const id = s.properties?.sheetId;
+    if (title && id != null) idMap.set(title, id);
+  }
+
+  // Reorder tabs to match TAB_ORDER exactly
+  const reorderRequests = TAB_ORDER
+    .map((tabName, index) => {
+      const sheetId = idMap.get(tabName);
+      if (sheetId == null) return null;
+      return {
+        updateSheetProperties: {
+          properties: { sheetId, index },
+          fields: "index",
+        },
+      };
+    })
+    .filter(Boolean);
+  if (reorderRequests.length > 0) {
+    await ctx.sheets.spreadsheets.batchUpdate({
+      spreadsheetId: ctx.spreadsheetId,
+      requestBody: { requests: reorderRequests },
+    });
+  }
+
+  return idMap;
 }
 
 // ----- Export / Import -----
@@ -362,10 +538,10 @@ export interface ExportResult {
   lastSync: string;
 }
 
-// DB -> Sheet. For each tab: clear data, then write header + all rows.
+// DB -> Sheet. For each tab: clear data, write values, then apply formatting.
 export async function exportToSheet(ctx?: SheetsContext): Promise<ExportResult> {
   const context = ctx ?? (await getSheetsContext());
-  await ensureTabs(context);
+  const sheetIds = await ensureTabs(context);
 
   const rowsByTab: Record<string, number> = {};
   for (const tab of TAB_ORDER) {
@@ -374,8 +550,6 @@ export async function exportToSheet(ctx?: SheetsContext): Promise<ExportResult> 
       spreadsheetId: context.spreadsheetId,
       range: `${tab}!A:Z`,
     });
-    // Block tabs: writer already includes header as first row.
-    // Other tabs: prepend the header from TAB_HEADERS.
     const allRows = BLOCK_TAB_NAMES.has(tab)
       ? [WorkoutSheetWriter.HEADER, ...rows]
       : [TAB_HEADERS[tab], ...rows];
@@ -386,6 +560,16 @@ export async function exportToSheet(ctx?: SheetsContext): Promise<ExportResult> 
       requestBody: { values: allRows },
     });
     rowsByTab[tab] = rows.length;
+
+    // Apply formatting if we have the sheetId
+    const sheetId = sheetIds.get(tab);
+    if (sheetId != null) {
+      if (BLOCK_TAB_NAMES.has(tab)) {
+        await applyBlockFormatting(context, sheetId, rows as (string | number)[][]);
+      } else {
+        await applySimpleHeaderFormat(context, sheetId);
+      }
+    }
   }
 
   const lastSync = new Date().toISOString();

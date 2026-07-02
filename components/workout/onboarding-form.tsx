@@ -6,11 +6,10 @@ import { useState } from "react";
 const LIFTS: { id: string; label: string }[] = [
   { id: "squat", label: "Squat" },
   { id: "bench", label: "Bench Press" },
-  { id: "deadlift", label: "Deadlift" },
-  { id: "ohp", label: "Overhead Press" },
+  { id: "deadlift", label: "Deadlift (Sumo)" },
 ];
 
-const TM_FACTOR = 0.9;
+const TM_FACTOR = 0.88;
 
 type Entry = { e1rm: string; tm: string; tmTouched: boolean };
 

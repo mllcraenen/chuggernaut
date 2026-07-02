@@ -5,7 +5,7 @@ import { triggerExportIfDue } from "@/lib/workout-sheets";
 
 export const dynamic = "force-dynamic";
 
-const WEEKS = 16;
+const WEEKS = 6;
 const DAYS = 4;
 
 function validWeekDay(week: unknown, day: unknown): { week: number; day: number } | null {

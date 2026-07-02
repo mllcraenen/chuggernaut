@@ -88,7 +88,6 @@ describe("exportToSheet", () => {
       { lift: "squat", e1rm: 180, trainingMax: 162 },
       { lift: "bench", e1rm: 120, trainingMax: 108 },
       { lift: "deadlift", e1rm: 220, trainingMax: 198 },
-      { lift: "ohp", e1rm: 80, trainingMax: 72 },
     ]);
     logSet({ week: 1, day: 1, exercise: "Competition Squat", setNumber: 1, actualWeight: 100, actualReps: 5 });
     getDb()
@@ -107,7 +106,7 @@ describe("exportToSheet", () => {
 
     const tmUpdate = updates.find((u) => u.range.startsWith(`${TAB_TRAINING_MAXES}!`))!;
     expect(tmUpdate.values[0]).toEqual(["lift", "e1rm", "training_max", "set_at"]);
-    expect(tmUpdate.values.length).toBe(1 + 4); // header + 4 lifts
+    expect(tmUpdate.values.length).toBe(1 + 3); // header + 3 lifts
     expect(tmUpdate.values[1][0]).toBe("squat");
 
     // Block tabs: first row is the writer header, subsequent rows include data + separators

@@ -9,7 +9,6 @@ const MOCK_TMS: Record<string, TrainingMax> = {
   squat:    { lift: "squat",    e1rm: 200, trainingMax: 180, setAt: "2026-01-01T00:00:00Z" },
   bench:    { lift: "bench",    e1rm: 140, trainingMax: 126, setAt: "2026-01-01T00:00:00Z" },
   deadlift: { lift: "deadlift", e1rm: 240, trainingMax: 216, setAt: "2026-01-01T00:00:00Z" },
-  ohp:      { lift: "ohp",      e1rm: 90,  trainingMax: 81,  setAt: "2026-01-01T00:00:00Z" },
 };
 
 function makeWriter(loggedSets: SetRow[] = []) {

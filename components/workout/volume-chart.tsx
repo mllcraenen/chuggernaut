@@ -1,17 +1,14 @@
 "use client";
 
+// Monolith Meet Prep: 4-week base block + 2-week strength base
 const BLOCK_COLORS: Record<number, string> = {
   1: "#4d8ef0", 2: "#4d8ef0", 3: "#4d8ef0", 4: "#4d8ef0",
-  5: "#f0a020", 6: "#f0a020", 7: "#f0a020", 8: "#f0a020",
-  9: "#f06020", 10: "#f06020", 11: "#f06020", 12: "#f06020",
-  13: "#e84545", 14: "#e84545", 15: "#e84545", 16: "#e84545",
+  5: "#f0a020", 6: "#f0a020",
 };
 
 const BLOCK_LABELS = [
-  { label: "Accum.", color: "#4d8ef0" },
-  { label: "Intensif.", color: "#f0a020" },
-  { label: "Heavy", color: "#f06020" },
-  { label: "Peak", color: "#e84545" },
+  { label: "Base (W1–4)", color: "#4d8ef0" },
+  { label: "Strength (W5–6)", color: "#f0a020" },
 ];
 
 type Point = { week: number; planned: number; actual: number };
@@ -19,7 +16,7 @@ type Point = { week: number; planned: number; actual: number };
 const W = 340;
 const H = 80;
 const PAD = { top: 4, right: 4, bottom: 16, left: 4 };
-const WEEKS = 16;
+const WEEKS = 6;
 
 export default function VolumeChart({ data }: { data: Point[] }) {
   const maxPlanned = Math.max(...data.map((d) => d.planned), 1);

@@ -1,5 +1,5 @@
 import { getDb } from "./workout-db";
-import { PROGRAM } from "./workout-program";
+import { PROGRAM, PROGRAM_WEEKS } from "./workout-program";
 import { markDirty } from "./sheets-sync";
 
 // ----- Key-value settings -----
@@ -33,13 +33,12 @@ export function getDaysOut(): { days: number; dateLabel: string } | null {
 
 // ----- Lifts & program constants -----
 
-export type LiftId = "squat" | "bench" | "deadlift" | "ohp";
+export type LiftId = "squat" | "bench" | "deadlift";
 
 export const LIFTS: { id: LiftId; label: string }[] = [
   { id: "squat", label: "Squat" },
   { id: "bench", label: "Bench Press" },
-  { id: "deadlift", label: "Deadlift" },
-  { id: "ohp", label: "Overhead Press" },
+  { id: "deadlift", label: "Deadlift (Sumo)" },
 ];
 
 const LIFT_IDS = new Set<string>(LIFTS.map((l) => l.id));
@@ -48,8 +47,8 @@ export function isLiftId(value: unknown): value is LiftId {
   return typeof value === "string" && LIFT_IDS.has(value);
 }
 
-// Calgary Barbell standard: training max = 90% of estimated 1RM.
-export const TM_FACTOR = 0.9;
+// Monolith Meet Prep: training max = 88% of estimated 1RM.
+export const TM_FACTOR = 0.88;
 
 // Epley estimated 1RM.
 export function epley1rm(weight: number, reps: number): number {
@@ -326,7 +325,7 @@ export function getPlannedWeeklyVolume(): { week: number; planned: number; actua
     .all<{ week: number; volume: number }>();
   const actualByWeek = Object.fromEntries(actualRows.map((r) => [r.week, Math.round(r.volume)]));
 
-  return Array.from({ length: 16 }, (_, i) => {
+  return Array.from({ length: PROGRAM_WEEKS }, (_, i) => {
     const week = i + 1;
     const days = PROGRAM.filter((d) => d.week === week);
     let planned = 0;
@@ -378,9 +377,11 @@ export function getE1rmHistory(lift: LiftId): E1rmPoint[] {
          WHERE logged_at IS NOT NULL AND e1rm IS NOT NULL
        ) AND ws.logged_at IS NOT NULL AND ws.e1rm IS NOT NULL
          AND ws.exercise NOT IN (
-           'Romanian Deadlift','Leg Press','Leg Curl','Ab Work','Barbell Row',
-           'Triceps Pushdown','Face Pull','Bicep Curl','Pull-ups','Lateral Raise',
-           'Rear Delt Fly','Tricep Extension','Chest-Supported Row'
+           'Row','Hamstring Curl','Curls','Adductor Rehab',
+           'Leg Press / Hack Squat','Pull-ups / Chins','Abs',
+           'Incline DB / Close-grip Bench','Chest-supported Row',
+           'Rear Delts / Face Pulls','Triceps Pushdown',
+           'Dips','Sled / Loaded Walk'
          )
        GROUP BY ws.week, ws.day
        ORDER BY ws.week ASC, ws.day ASC
