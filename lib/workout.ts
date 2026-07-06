@@ -47,8 +47,9 @@ export function isLiftId(value: unknown): value is LiftId {
   return typeof value === "string" && LIFT_IDS.has(value);
 }
 
-// Monolith Meet Prep: training max = 88% of estimated 1RM.
-export const TM_FACTOR = 0.88;
+// Canonical TM factor lives in workout-program.ts (client-safe); re-exported
+// here for server-side callers already importing from lib/workout.
+export { TM_FACTOR } from "./workout-program";
 
 // Epley estimated 1RM.
 export function epley1rm(weight: number, reps: number): number {
@@ -432,28 +433,41 @@ export interface E1rmPoint {
   loggedAt: string;
 }
 
+// Exercise names belonging to a lift, derived from the program's `ex.lift`
+// field (never from name patterns). Active swaps fold in: a swapped-in
+// exercise inherits the original's lift. This helper is the single seam the
+// exercise registry (Phase 3) later replaces.
+export function getExercisesForLift(lift: LiftId): string[] {
+  const names = new Set<string>();
+  for (const day of PROGRAM) {
+    for (const ex of day.exercises) {
+      if (ex.lift === lift) names.add(ex.name);
+    }
+  }
+  const swaps = getDb()
+    .prepare("SELECT original_exercise, replacement_exercise FROM workout_swaps")
+    .all<{ original_exercise: string; replacement_exercise: string }>();
+  for (const s of swaps) {
+    if (names.has(s.original_exercise)) names.add(s.replacement_exercise);
+  }
+  return [...names];
+}
+
 export function getE1rmHistory(lift: LiftId): E1rmPoint[] {
+  const exercises = getExercisesForLift(lift);
+  if (exercises.length === 0) return [];
+  const placeholders = exercises.map(() => "?").join(",");
   const rows = getDb()
     .prepare(
-      `SELECT ws.week, ws.day, MAX(ws.e1rm) AS e1rm, MAX(ws.logged_at) AS logged_at
-       FROM workout_sets ws
-       JOIN workout_training_maxes tm ON tm.lift = ?
-       WHERE ws.exercise IN (
-         SELECT exercise FROM workout_sets
-         WHERE logged_at IS NOT NULL AND e1rm IS NOT NULL
-       ) AND ws.logged_at IS NOT NULL AND ws.e1rm IS NOT NULL
-         AND ws.exercise NOT IN (
-           'Row','Hamstring Curl','Curls','Adductor Rehab',
-           'Leg Press / Hack Squat','Pull-ups / Chins','Abs',
-           'Incline DB / Close-grip Bench','Chest-supported Row',
-           'Rear Delts / Face Pulls','Triceps Pushdown',
-           'Dips','Sled / Loaded Walk'
-         )
-       GROUP BY ws.week, ws.day
-       ORDER BY ws.week ASC, ws.day ASC
+      `SELECT week, day, MAX(e1rm) AS e1rm, MAX(logged_at) AS logged_at
+       FROM workout_sets
+       WHERE logged_at IS NOT NULL AND e1rm IS NOT NULL
+         AND exercise IN (${placeholders})
+       GROUP BY week, day
+       ORDER BY week ASC, day ASC
        LIMIT 200`
     )
-    .all<{ week: number; day: number; e1rm: number; logged_at: string }>(lift);
+    .all<{ week: number; day: number; e1rm: number; logged_at: string }>(...exercises);
 
   return rows.map((r) => ({
     week: r.week,

@@ -2,18 +2,22 @@ import { describe, it, expect } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { getWarmup } from "../lib/warmup-routines";
+import {
+  getWarmupForDay,
+  liftsForDay,
+  GENERAL_WARMUP,
+  LIFT_WARMUPS,
+} from "../lib/warmup-routines";
 import WarmupChecklist from "../components/workout/warmup-checklist";
 import { PROGRAM } from "../lib/workout-program";
 
-const DAY_LABELS = ["Squat Focus", "Bench Focus", "Press Focus", "Deadlift Focus"];
-
-describe("getWarmup", () => {
-  it("returns a non-empty array for each of the 4 day labels", () => {
-    for (const label of DAY_LABELS) {
-      const drills = getWarmup(label);
-      expect(Array.isArray(drills)).toBe(true);
-      expect(drills.length).toBeGreaterThan(0);
+describe("getWarmupForDay", () => {
+  // Invariant (design principle 2): a program change must never silently
+  // disable warmups — every program day yields at least one drill.
+  it("yields at least one drill for every program day", () => {
+    for (const day of PROGRAM) {
+      const drills = getWarmupForDay(day);
+      expect(drills.length, `W${day.week}D${day.day}`).toBeGreaterThan(0);
       for (const d of drills) {
         expect(typeof d.name).toBe("string");
         expect(d.name.length).toBeGreaterThan(0);
@@ -23,23 +27,36 @@ describe("getWarmup", () => {
     }
   });
 
-  it("returns [] for an unknown label (graceful)", () => {
-    expect(getWarmup("Cardio Focus")).toEqual([]);
-    expect(getWarmup("")).toEqual([]);
+  it("is exactly the general block plus one block per distinct lift", () => {
+    for (const day of PROGRAM) {
+      const expected = [
+        ...GENERAL_WARMUP,
+        ...liftsForDay(day).flatMap((l) => LIFT_WARMUPS[l]),
+      ];
+      expect(getWarmupForDay(day)).toEqual(expected);
+    }
   });
 
-  it("covers every label used in the actual program", () => {
-    const programLabels = new Set(PROGRAM.map((d) => d.label));
-    for (const label of programLabels) {
-      expect(getWarmup(label).length).toBeGreaterThan(0);
+  it("derives lifts from exercise structure, not labels", () => {
+    for (const day of PROGRAM) {
+      const structuralLifts = new Set(
+        day.exercises.map((e) => e.lift).filter((l) => l !== null)
+      );
+      expect(new Set(liftsForDay(day))).toEqual(structuralLifts);
+    }
+  });
+
+  it("every lift has a non-empty warmup block", () => {
+    for (const drills of Object.values(LIFT_WARMUPS)) {
+      expect(drills.length).toBeGreaterThan(0);
     }
   });
 });
 
 describe("WarmupChecklist render", () => {
-  it("renders the warmup section header for each day type", () => {
-    for (const label of DAY_LABELS) {
-      const drills = getWarmup(label);
+  it("renders the warmup section header for each program day", () => {
+    for (const day of PROGRAM) {
+      const drills = getWarmupForDay(day);
       const html = renderToStaticMarkup(createElement(WarmupChecklist, { drills }));
       expect(html).toContain(`Warm-up · ${drills.length} drills`);
     }

@@ -12,6 +12,32 @@ import type { LiftId } from "./workout";
 export const PROGRAM_WEEKS = 6;
 export const PROGRAM_DAYS = 4;
 
+// Canonical training-max factor. Lives here (not lib/workout.ts) so client
+// components can import it without pulling in node:sqlite.
+export const TM_FACTOR = 0.88;
+
+// Block layout derived from the program length: 4-week chunks, last chunk may
+// be short. Structurally compatible with sheet-writer's BlockDefinition.
+export type ProgramBlock = { name: string; weeks: number[] };
+
+export const PROGRAM_BLOCKS: ProgramBlock[] = (() => {
+  const blocks: ProgramBlock[] = [];
+  for (let start = 1; start <= PROGRAM_WEEKS; start += 4) {
+    const end = Math.min(start + 3, PROGRAM_WEEKS);
+    blocks.push({
+      name: `Block ${blocks.length + 1} (W${start}–${end})`,
+      weeks: Array.from({ length: end - start + 1 }, (_, i) => start + i),
+    });
+  }
+  return blocks;
+})();
+
+// Last week of the block containing `week` (used for block-scoped swaps).
+export function blockEndWeek(week: number): number {
+  const block = PROGRAM_BLOCKS.find((b) => b.weeks.includes(week));
+  return block ? block.weeks[block.weeks.length - 1] : week;
+}
+
 export type ProgramSet = {
   setNumber: number;
   percentOfTM: number | null;

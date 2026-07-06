@@ -10,7 +10,6 @@ const LIFT_LABELS: Record<LiftId, string> = {
   squat: "Squat",
   bench: "Bench Press",
   deadlift: "Deadlift",
-  ohp: "Overhead Press",
 };
 
 type Props = {

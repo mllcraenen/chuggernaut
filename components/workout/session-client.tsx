@@ -10,6 +10,7 @@ import type { Unit } from "@/lib/units";
 import { calculatePlates } from "@/lib/plate-calculator";
 import AutoregulateSheet from "@/components/workout/autoregulate-sheet";
 import type { AdjustmentSuggestion } from "@/lib/autoregulation";
+import { TM_FACTOR } from "@/lib/workout-program";
 
 // ----- Types (shared with the server page) -----
 
@@ -224,7 +225,7 @@ function SessionInner({
                 const tm = suggMap.get(cur.lift)!;
                 return {
                   lift: cur.lift,
-                  e1rm: Math.round((tm / 0.9) * 10) / 10,
+                  e1rm: Math.round((tm / TM_FACTOR) * 10) / 10,
                   trainingMax: tm,
                 };
               }
@@ -733,11 +734,26 @@ function SetRow({
                 type="button"
                 aria-label="Show plate loading"
                 onClick={(e) => { e.stopPropagation(); setPlateOpen((v) => !v); }}
-                className={`text-base leading-none transition-colors ${
+                className={`leading-none transition-colors ${
                   plateOpen ? "text-[#e84545]" : "text-[#3d5080] hover:text-[#8e8e93]"
                 }`}
               >
-                🏋
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <line x1="1" y1="12" x2="4" y2="12" />
+                  <rect x="4" y="7" width="3" height="10" rx="1" fill="currentColor" stroke="none" />
+                  <rect x="17" y="7" width="3" height="10" rx="1" fill="currentColor" stroke="none" />
+                  <line x1="7" y1="12" x2="17" y2="12" />
+                  <line x1="20" y1="12" x2="23" y2="12" />
+                </svg>
               </button>
             )}
             {set.note && (

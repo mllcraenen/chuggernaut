@@ -2,7 +2,8 @@ import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { createSwap, clearSwap } from "@/lib/workout";
 import { triggerExportIfDue } from "@/lib/workout-sheets";
-import { blockEndWeek, getAlternatives } from "@/lib/exercise-alternatives";
+import { getAlternatives } from "@/lib/exercise-alternatives";
+import { blockEndWeek } from "@/lib/workout-program";
 
 export const dynamic = "force-dynamic";
 

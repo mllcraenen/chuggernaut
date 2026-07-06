@@ -2,14 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { TM_FACTOR } from "@/lib/workout-program";
 
 const LIFTS: { id: string; label: string }[] = [
   { id: "squat", label: "Squat" },
   { id: "bench", label: "Bench Press" },
   { id: "deadlift", label: "Deadlift (Sumo)" },
 ];
-
-const TM_FACTOR = 0.88;
 
 type Entry = { e1rm: string; tm: string; tmTouched: boolean };
 

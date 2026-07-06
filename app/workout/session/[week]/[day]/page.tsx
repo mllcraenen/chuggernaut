@@ -3,7 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import {
   getTrainingMaxes,
-  startSession,
+  getSession,
   getSetsForSession,
   getPreviousSetMap,
   getSwapsForSession,
@@ -51,8 +51,9 @@ export default async function SessionPage({ params }: Params) {
   if (!programDay) notFound();
 
   const tms = getTrainingMaxes();
-  // Mark session as started immediately on page load (explicit session start)
-  const sessionRow = startSession(week, day);
+  // Sessions are started explicitly from the preview screen — never on render.
+  const sessionRow = getSession(week, day);
+  if (!sessionRow?.startedAt) redirect(`/workout/preview/${week}/${day}`);
   const loggedSets = getSetsForSession(week, day);
 
   // Map logged rows by "<exercise>#<setNumber>" for quick lookup.

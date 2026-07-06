@@ -9,7 +9,9 @@ import {
 import type { SessionRow } from "@/lib/workout";
 import VolumeChart from "@/components/workout/volume-chart";
 
-type CellStatus = "completed" | "active" | "upcoming";
+// "current" = honestly in progress (started, not completed).
+// "next" = first not-completed day — the suggested next workout.
+type CellStatus = "completed" | "current" | "next" | "upcoming";
 
 function key(week: number, day: number): string {
   return `${week}-${day}`;
@@ -23,14 +25,17 @@ function buildStatusMap(sessions: SessionRow[]): Map<string, CellStatus> {
     else if (s.startedAt) started.add(key(s.week, s.day));
   }
 
-  const firstOpen = PROGRAM.find((d) => !completed.has(key(d.week, d.day)));
+  const firstOpen = PROGRAM.find(
+    (d) => !completed.has(key(d.week, d.day)) && !started.has(key(d.week, d.day))
+  );
   const firstOpenKey = firstOpen ? key(firstOpen.week, firstOpen.day) : null;
 
   const map = new Map<string, CellStatus>();
   for (const d of PROGRAM) {
     const k = key(d.week, d.day);
     if (completed.has(k)) map.set(k, "completed");
-    else if (started.has(k) || k === firstOpenKey) map.set(k, "active");
+    else if (started.has(k)) map.set(k, "current");
+    else if (k === firstOpenKey) map.set(k, "next");
     else map.set(k, "upcoming");
   }
   return map;
@@ -49,10 +54,9 @@ function HeroCard({
   status: CellStatus;
   daysOut: { days: number; dateLabel: string } | null;
 }) {
-  const href = status === "active"
-    ? `/workout/session/${day.week}/${day.day}`
-    : `/workout/preview/${day.week}/${day.day}`;
-  const ctaLabel = status === "completed" ? "Review" : status === "active" ? "Continue" : "Start";
+  // Always via the preview — warmups live there, and starting is explicit.
+  const href = `/workout/preview/${day.week}/${day.day}`;
+  const ctaLabel = status === "completed" ? "Review" : status === "current" ? "Continue" : "Start";
 
   return (
     <div className="rounded-2xl border border-[#2a3352] bg-[#1e2740] overflow-hidden">
@@ -66,7 +70,7 @@ function HeroCard({
       )}
       <div className="px-5 pt-4 pb-4">
         <p className="text-xs font-semibold text-[#e84545] uppercase tracking-widest mb-1">
-          {status === "completed" ? "Last completed" : "Next up"}
+          {status === "completed" ? "Last completed" : status === "current" ? "In progress" : "Next up"}
         </p>
         <div className="flex items-baseline gap-3">
           <span className="text-base text-[#8e8e93] font-semibold">Week {day.week}</span>
@@ -88,18 +92,18 @@ function HeroCard({
 }
 
 function DayRow({ day, status }: { day: ProgramDay; status: CellStatus }) {
-  const href = status === "active"
-    ? `/workout/session/${day.week}/${day.day}`
-    : `/workout/preview/${day.week}/${day.day}`;
+  const href = `/workout/preview/${day.week}/${day.day}`;
 
   return (
     <Link href={href} className="flex items-center gap-4 px-4 py-3 hover:bg-[#242f4a] transition-colors">
       <div className={`w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold border ${
         status === "completed"
           ? "bg-[#30d158]/20 border-[#30d158] text-[#30d158]"
-          : status === "active"
+          : status === "current"
             ? "bg-[#e84545]/20 border-[#e84545] text-[#e84545]"
-            : "bg-transparent border-[#2a3352] text-[#3d5080]"
+            : status === "next"
+              ? "bg-transparent border-[#e84545]/50 text-[#e84545]"
+              : "bg-transparent border-[#2a3352] text-[#3d5080]"
       }`}>
         {status === "completed" ? "✓" : day.day}
       </div>
@@ -109,8 +113,11 @@ function DayRow({ day, status }: { day: ProgramDay; status: CellStatus }) {
           <span className={`text-sm font-medium ${status === "upcoming" ? "text-[#8e8e93]" : "text-[#f5f5f5]"}`}>
             Day {day.day}
           </span>
-          {status === "active" && (
+          {status === "current" && (
             <span className="text-[10px] font-semibold uppercase tracking-wide text-[#e84545]">current</span>
+          )}
+          {status === "next" && (
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-[#8e8e93]">next</span>
           )}
         </div>
         <p className="text-xs text-[#8e8e93] truncate">{day.label} · {liftsLine(day)}</p>
@@ -133,8 +140,9 @@ export default function ProgramOverview({
   const statusMap = buildStatusMap(sessions);
   const weeks = Array.from({ length: PROGRAM_WEEKS }, (_, i) => i + 1);
 
-  const activeDay = PROGRAM.find((d) => statusMap.get(key(d.week, d.day)) === "active");
-  const heroDay = activeDay ?? PROGRAM[0];
+  const currentDay = PROGRAM.find((d) => statusMap.get(key(d.week, d.day)) === "current");
+  const nextDay = PROGRAM.find((d) => statusMap.get(key(d.week, d.day)) === "next");
+  const heroDay = currentDay ?? nextDay ?? PROGRAM[0];
   const heroStatus = statusMap.get(key(heroDay.week, heroDay.day)) ?? "upcoming";
 
   return (
@@ -153,7 +161,10 @@ export default function ProgramOverview({
         {weeks.map((week) => {
           const days = PROGRAM.filter((d) => d.week === week);
           const doneCount = days.filter((d) => statusMap.get(key(d.week, d.day)) === "completed").length;
-          const isCurrentWeek = days.some((d) => statusMap.get(key(d.week, d.day)) === "active");
+          const isCurrentWeek = days.some((d) => {
+            const s = statusMap.get(key(d.week, d.day));
+            return s === "current" || s === "next";
+          });
           const weekDone = doneCount === PROGRAM_DAYS;
 
           return (

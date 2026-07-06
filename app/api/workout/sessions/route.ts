@@ -2,11 +2,9 @@ import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { listSessions, startSession } from "@/lib/workout";
 import { triggerExportIfDue } from "@/lib/workout-sheets";
+import { PROGRAM_WEEKS as WEEKS, PROGRAM_DAYS as DAYS } from "@/lib/workout-program";
 
 export const dynamic = "force-dynamic";
-
-const WEEKS = 6;
-const DAYS = 4;
 
 function validWeekDay(week: unknown, day: unknown): { week: number; day: number } | null {
   const w = Number(week);

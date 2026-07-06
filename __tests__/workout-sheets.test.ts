@@ -42,13 +42,17 @@ import {
   TAB_TRAINING_MAXES,
   TAB_BODY_WEIGHT,
   TAB_SWAPS,
-  CB16_BLOCKS,
-  BLOCK_TAB_NAMES,
+  BLOCKS,
 } from "@/lib/workout-sheets";
 import { WorkoutSheetWriter } from "@/lib/sheet-writer";
+import { PROGRAM } from "@/lib/workout-program";
 
-// All tabs: 4 block tabs + 3 non-block tabs
-const ALL_TABS = [...CB16_BLOCKS.map(b => b.name), TAB_TRAINING_MAXES, TAB_BODY_WEIGHT, TAB_SWAPS];
+// Program-agnostic fixture: a main-lift exercise from week 1 day 1.
+const W1D1_MAIN = PROGRAM.find((d) => d.week === 1 && d.day === 1)!
+  .exercises.find((e) => e.lift !== null)!;
+
+// All tabs: program block tabs + 3 non-block tabs
+const ALL_TABS = [...BLOCKS.map(b => b.name), TAB_TRAINING_MAXES, TAB_BODY_WEIGHT, TAB_SWAPS];
 
 function makeFakeSheets(getData: Record<string, unknown[][]> = {}) {
   const updates: { range: string; values: unknown[][] }[] = [];
@@ -89,7 +93,7 @@ describe("exportToSheet", () => {
       { lift: "bench", e1rm: 120, trainingMax: 108 },
       { lift: "deadlift", e1rm: 220, trainingMax: 198 },
     ]);
-    logSet({ week: 1, day: 1, exercise: "Competition Squat", setNumber: 1, actualWeight: 100, actualReps: 5 });
+    logSet({ week: 1, day: 1, exercise: W1D1_MAIN.name, setNumber: 1, actualWeight: 100, actualReps: 5 });
     getDb()
       .prepare("INSERT INTO workout_body_weight (date, weight_kg) VALUES (?,?)")
       .run("2026-06-20", 82.5);
@@ -110,18 +114,18 @@ describe("exportToSheet", () => {
     expect(tmUpdate.values[1][0]).toBe("squat");
 
     // Block tabs: first row is the writer header, subsequent rows include data + separators
-    const block1Update = updates.find((u) => u.range.startsWith(`${CB16_BLOCKS[0].name}!`))!;
+    const block1Update = updates.find((u) => u.range.startsWith(`${BLOCKS[0].name}!`))!;
     expect(block1Update).toBeDefined();
     expect(block1Update.values[0]).toEqual(WorkoutSheetWriter.HEADER);
-    // A logged set for Week 1 Day 1 Competition Squat should appear
-    const dataRow = block1Update.values.find(r => WorkoutSheetWriter.parseKey(r[0]) !== null && r[4] === "Competition Squat");
+    // The logged Week 1 Day 1 main-lift set should appear
+    const dataRow = block1Update.values.find(r => WorkoutSheetWriter.parseKey(r[0]) !== null && r[4] === W1D1_MAIN.name);
     expect(dataRow).toBeDefined();
     expect(dataRow![7]).toBe(100); // actual weight
 
     const bwUpdate = updates.find((u) => u.range.startsWith(`${TAB_BODY_WEIGHT}!`))!;
     expect(bwUpdate.values[1]).toEqual(["2026-06-20", 82.5]);
 
-    expect(result.rowsByTab[TAB_TRAINING_MAXES]).toBe(4);
+    expect(result.rowsByTab[TAB_TRAINING_MAXES]).toBe(3); // data rows, header excluded
     expect(result.rowsByTab[TAB_BODY_WEIGHT]).toBe(1);
   });
 
@@ -177,7 +181,7 @@ describe("importFromSheet", () => {
 
     const key = WorkoutSheetWriter.makeKey(1, 1, 1, "Competition Squat");
     const data: Record<string, unknown[][]> = {
-      [CB16_BLOCKS[0].name]: [
+      [BLOCKS[0].name]: [
         WorkoutSheetWriter.HEADER,
         [key, 1, 1, "Squat Focus", "Competition Squat", "Set 1 (Top)", "90kg × 5 @RPE7", 92.5, 5, 7.5, 107.3],
       ],
@@ -198,7 +202,7 @@ describe("importFromSheet", () => {
     const { getSetsForSession } = await import("@/lib/workout");
     const key = WorkoutSheetWriter.makeKey(2, 1, 1, "Competition Bench");
     const data: Record<string, unknown[][]> = {
-      [CB16_BLOCKS[0].name]: [
+      [BLOCKS[0].name]: [
         WorkoutSheetWriter.HEADER,
         [key, 2, 1, "Bench Focus", "Competition Bench", "Set 1", "80kg × 5 @RPE7", 82.5, 5, 8, 96],
       ],
@@ -213,7 +217,7 @@ describe("importFromSheet", () => {
     const { importFromSheet } = await import("@/lib/workout-sheets");
     const { getSetsForSession } = await import("@/lib/workout");
     const data: Record<string, unknown[][]> = {
-      [CB16_BLOCKS[0].name]: [
+      [BLOCKS[0].name]: [
         WorkoutSheetWriter.HEADER,
         ["", "", 1, "=== Day 1: Squat Focus ===", "", "", "", "", "", "", ""],
         ["", 1, 1, "Squat Focus", "", "— Week 1 —", "", "", "", "", ""],

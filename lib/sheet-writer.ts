@@ -68,8 +68,8 @@ export class WorkoutSheetWriter {
         const weight = Math.round(tm * set.percentOfTM / 100 * 2) / 2;
         return `${weight}kg × ${set.reps}${rpeStr}`;
       }
-      // TM not set yet — show percentage
-      return `${Math.round(set.percentOfTM * 100)}% × ${set.reps}${rpeStr}`;
+      // TM not set yet — show percentage (percentOfTM is already a whole number)
+      return `${Math.round(set.percentOfTM)}% × ${set.reps}${rpeStr}`;
     }
     // Accessory: no prescribed weight
     return `${set.reps} reps${rpeStr}`;
