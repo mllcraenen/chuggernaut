@@ -166,7 +166,13 @@ function makeWriter(): WorkoutSheetWriter {
       e1rm: r.e1rm as number | null,
       loggedAt: r.logged_at as string | null,
     }));
-  return new WorkoutSheetWriter(PROGRAM, BLOCKS, tms, loggedSets);
+  const notes: Record<string, string> = {};
+  for (const n of db
+    .prepare("SELECT week, day, exercise, note FROM workout_notes")
+    .all<{ week: number; day: number; exercise: string; note: string }>()) {
+    notes[WorkoutSheetWriter.noteKey(n.week, n.day, n.exercise)] = n.note;
+  }
+  return new WorkoutSheetWriter(PROGRAM, BLOCKS, tms, loggedSets, notes);
 }
 
 function readTabRows(tab: string): (string | number)[][] {
@@ -221,12 +227,31 @@ function numOrNull(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function upsertTabRows(tab: string, rows: unknown[][]): number {
+function upsertTabRows(tab: string, rows: unknown[][], hasNotesColumn = false): number {
   const db = getDb();
   let count = 0;
 
   // Block tabs — parse key column, upsert actual values only
   if (BLOCK_TAB_NAMES.has(tab)) {
+    // Notes (only when the tab's header has the column — older sheets leave
+    // DB notes untouched). Sheet is authoritative: empty cell clears the note.
+    // Raw SQL, not setNote/deleteNote — importing must not re-mark dirty.
+    if (hasNotesColumn) {
+      const insNote = db.prepare(
+        `INSERT INTO workout_notes (week, day, exercise, note, updated_at)
+         VALUES (?,?,?,?,?)
+         ON CONFLICT(week, day, exercise) DO UPDATE SET note=excluded.note, updated_at=excluded.updated_at`
+      );
+      const delNote = db.prepare(
+        "DELETE FROM workout_notes WHERE week=? AND day=? AND exercise=?"
+      );
+      const now = new Date().toISOString();
+      for (const n of WorkoutSheetWriter.parseBlockNotes(rows)) {
+        if (n.note) insNote.run(n.week, n.day, n.exercise, n.note, now);
+        else delNote.run(n.week, n.day, n.exercise);
+      }
+    }
+
     const records = WorkoutSheetWriter.parseBlockRows(rows);
     const exists = db.prepare(
       "SELECT id FROM workout_sets WHERE week=? AND day=? AND exercise=? AND set_number=?"
@@ -419,6 +444,7 @@ async function applyBlockFormatting(
     [8, 9, 95],   // Actual Reps
     [9, 10, 65],  // RPE
     [10, 11, 80], // e1RM
+    [11, 12, 200], // Notes
   ];
   for (const [start, end, px] of colWidths) {
     requests.push({ updateDimensionProperties: {
@@ -595,8 +621,10 @@ export async function importFromSheet(ctx?: SheetsContext): Promise<ImportResult
       // Tab may not exist yet on a fresh sheet — treat as empty.
       values = [];
     }
+    const header = values[0] ?? [];
+    const hasNotesColumn = header.some((c) => String(c ?? "").trim() === "Notes");
     const dataRows = values.slice(1); // skip header
-    rowsByTab[tab] = upsertTabRows(tab, dataRows);
+    rowsByTab[tab] = upsertTabRows(tab, dataRows, hasNotesColumn);
   }
 
   const lastSync = new Date().toISOString();

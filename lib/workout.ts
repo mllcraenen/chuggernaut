@@ -641,12 +641,14 @@ export function setNote(week: number, day: number, exercise: string, note: strin
        ON CONFLICT(week, day, exercise) DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at`
     )
     .run(week, day, exercise, note, now);
+  markDirty();
 }
 
 export function deleteNote(week: number, day: number, exercise: string): void {
   getDb()
     .prepare("DELETE FROM workout_notes WHERE week = ? AND day = ? AND exercise = ?")
     .run(week, day, exercise);
+  markDirty();
 }
 
 export function getNotesForSession(week: number, day: number): Record<string, string> {

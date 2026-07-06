@@ -220,6 +220,64 @@ describe("WorkoutSheetWriter.parseBlockRows", () => {
   });
 });
 
+// ── notes column ──────────────────────────────────────────────────────────────
+
+describe("notes column", () => {
+  const NOTE = "Keep bracing tight";
+  const notes = { [WorkoutSheetWriter.noteKey(1, 1, W1D1_MAIN.name)]: NOTE };
+  const writer = new WorkoutSheetWriter(PROGRAM, BLOCKS, MOCK_TMS, [], notes);
+  const rows = writer.generateBlock(BLOCKS[0]);
+
+  it("Notes is the last header column (appended right — round-trip rule)", () => {
+    expect(WorkoutSheetWriter.HEADER[WorkoutSheetWriter.HEADER.length - 1]).toBe("Notes");
+    expect(WorkoutSheetWriter.NOTES_COL).toBe(WorkoutSheetWriter.HEADER.length - 1);
+  });
+
+  it("renders the note on the exercise's first set row only", () => {
+    const exRows = rows.filter((r) => {
+      const p = WorkoutSheetWriter.parseKey(r[0]);
+      return p !== null && p.week === 1 && p.day === 1 && p.exercise === W1D1_MAIN.name;
+    });
+    expect(exRows.length).toBeGreaterThan(1);
+    expect(exRows[0][WorkoutSheetWriter.NOTES_COL]).toBe(NOTE);
+    for (const r of exRows.slice(1)) {
+      expect(r[WorkoutSheetWriter.NOTES_COL]).toBe("");
+    }
+  });
+
+  it("all other data rows have an empty notes cell", () => {
+    for (const r of rows) {
+      const p = WorkoutSheetWriter.parseKey(r[0]);
+      if (p === null || (p.week === 1 && p.day === 1 && p.exercise === W1D1_MAIN.name)) continue;
+      expect(r[WorkoutSheetWriter.NOTES_COL]).toBe("");
+    }
+  });
+
+  it("parseBlockNotes reads the first-set row per exercise, empties included", () => {
+    const parsed = WorkoutSheetWriter.parseBlockNotes(rows);
+    const withNote = parsed.find(
+      (n) => n.week === 1 && n.day === 1 && n.exercise === W1D1_MAIN.name
+    );
+    expect(withNote?.note).toBe(NOTE);
+    // Every other (week, day, exercise) combo reports an empty note
+    for (const n of parsed) {
+      if (n.week === 1 && n.day === 1 && n.exercise === W1D1_MAIN.name) continue;
+      expect(n.note).toBe("");
+    }
+    // One entry per combo, not per set row
+    const keys = parsed.map((n) => WorkoutSheetWriter.noteKey(n.week, n.day, n.exercise));
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("notes round-trip: generate → parseBlockNotes recovers the input map", () => {
+    const recovered: Record<string, string> = {};
+    for (const n of WorkoutSheetWriter.parseBlockNotes(rows)) {
+      if (n.note) recovered[WorkoutSheetWriter.noteKey(n.week, n.day, n.exercise)] = n.note;
+    }
+    expect(recovered).toEqual(notes);
+  });
+});
+
 // ── tabNames ──────────────────────────────────────────────────────────────────
 
 describe("WorkoutSheetWriter.tabNames", () => {

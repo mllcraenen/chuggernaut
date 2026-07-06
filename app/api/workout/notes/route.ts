@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { getNotesForSession, setNote, deleteNote } from "@/lib/workout";
+import { triggerExportIfDue } from "@/lib/workout-sheets";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,7 @@ export async function POST(req: NextRequest) {
   }
 
   setNote(week, day, exercise, note);
+  triggerExportIfDue();
   return NextResponse.json({ ok: true });
 }
 
@@ -76,5 +78,6 @@ export async function DELETE(req: NextRequest) {
   }
 
   deleteNote(week, day, exercise);
+  triggerExportIfDue();
   return NextResponse.json({ ok: true });
 }

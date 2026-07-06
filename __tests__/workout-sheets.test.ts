@@ -31,6 +31,7 @@ beforeEach(async () => {
     "workout_settings",
     "workout_swaps",
     "workout_body_weight",
+    "workout_notes",
   ]) {
     db.exec(`DELETE FROM ${t}`);
   }
@@ -226,6 +227,102 @@ describe("importFromSheet", () => {
     const { sheets } = makeFakeSheets(data);
     await importFromSheet({ sheets: sheets as never, spreadsheetId: "SHEET_ID" });
     expect(getSetsForSession(1, 1).length).toBe(0);
+  });
+});
+
+// ---- Notes ↔ sheet (2.2) ----
+
+describe("notes ↔ sheet", () => {
+  const NOTES_COL = WorkoutSheetWriter.NOTES_COL;
+
+  it("exports the note on the exercise's first set row", async () => {
+    const { setNote } = await import("@/lib/workout");
+    setNote(1, 1, W1D1_MAIN.name, "Belt on last set");
+
+    const { exportToSheet } = await import("@/lib/workout-sheets");
+    const { sheets, updates } = makeFakeSheets();
+    await exportToSheet({ sheets: sheets as never, spreadsheetId: "SHEET_ID" });
+
+    const block1 = updates.find((u) => u.range.startsWith(`${BLOCKS[0].name}!`))!;
+    const exRows = block1.values.filter((r) => {
+      const p = WorkoutSheetWriter.parseKey(r[0]);
+      return p !== null && p.week === 1 && p.day === 1 && p.exercise === W1D1_MAIN.name;
+    });
+    expect(exRows[0][NOTES_COL]).toBe("Belt on last set");
+    for (const r of exRows.slice(1)) expect(r[NOTES_COL]).toBe("");
+  });
+
+  it("imports a note from a first-set row, even with no logged actuals (D4)", async () => {
+    const { importFromSheet } = await import("@/lib/workout-sheets");
+    const { getNote } = await import("@/lib/workout");
+
+    const key = WorkoutSheetWriter.makeKey(1, 1, 1, W1D1_MAIN.name);
+    const row = [key, 1, 1, "Day", W1D1_MAIN.name, "Set 1", "90kg × 5", "", "", "", "", "Grip felt off"];
+    const data = { [BLOCKS[0].name]: [WorkoutSheetWriter.HEADER, row] };
+    const { sheets } = makeFakeSheets(data);
+    await importFromSheet({ sheets: sheets as never, spreadsheetId: "SHEET_ID" });
+
+    expect(getNote(1, 1, W1D1_MAIN.name)).toBe("Grip felt off");
+  });
+
+  it("an empty note cell clears the stored note (sheet authoritative)", async () => {
+    const { setNote, getNote } = await import("@/lib/workout");
+    setNote(1, 1, W1D1_MAIN.name, "Stale note");
+
+    const { importFromSheet } = await import("@/lib/workout-sheets");
+    const key = WorkoutSheetWriter.makeKey(1, 1, 1, W1D1_MAIN.name);
+    const row = [key, 1, 1, "Day", W1D1_MAIN.name, "Set 1", "90kg × 5", 92.5, 5, "", "", ""];
+    const data = { [BLOCKS[0].name]: [WorkoutSheetWriter.HEADER, row] };
+    const { sheets } = makeFakeSheets(data);
+    await importFromSheet({ sheets: sheets as never, spreadsheetId: "SHEET_ID" });
+
+    expect(getNote(1, 1, W1D1_MAIN.name)).toBeNull();
+  });
+
+  it("tolerates old sheets without a Notes column — notes untouched", async () => {
+    const { setNote, getNote } = await import("@/lib/workout");
+    setNote(1, 1, W1D1_MAIN.name, "Preserved note");
+
+    const { importFromSheet } = await import("@/lib/workout-sheets");
+    const oldHeader = WorkoutSheetWriter.HEADER.slice(0, NOTES_COL);
+    const key = WorkoutSheetWriter.makeKey(1, 1, 1, W1D1_MAIN.name);
+    const row = [key, 1, 1, "Day", W1D1_MAIN.name, "Set 1", "90kg × 5", 92.5, 5, "", ""];
+    const data = { [BLOCKS[0].name]: [oldHeader, row] };
+    const { sheets } = makeFakeSheets(data);
+    await importFromSheet({ sheets: sheets as never, spreadsheetId: "SHEET_ID" });
+
+    expect(getNote(1, 1, W1D1_MAIN.name)).toBe("Preserved note");
+  });
+
+  it("is lossless: export → wipe → import → export produces identical block tabs", async () => {
+    const { setTrainingMaxes, logSet, setNote } = await import("@/lib/workout");
+    const { exportToSheet, importFromSheet } = await import("@/lib/workout-sheets");
+    const { getDb } = await import("@/lib/workout-db");
+
+    setTrainingMaxes([
+      { lift: "squat", e1rm: 180, trainingMax: 162 },
+      { lift: "bench", e1rm: 120, trainingMax: 108 },
+      { lift: "deadlift", e1rm: 220, trainingMax: 198 },
+    ]);
+    logSet({ week: 1, day: 1, exercise: W1D1_MAIN.name, setNumber: 1, actualWeight: 100, actualReps: 5, actualRpe: 8 });
+    setNote(1, 1, W1D1_MAIN.name, "Belt on last set");
+
+    const first = makeFakeSheets();
+    await exportToSheet({ sheets: first.sheets as never, spreadsheetId: "SID" });
+    const firstByTab = Object.fromEntries(first.updates.map((u) => [u.range.split("!")[0], u.values]));
+
+    // Wipe user data, then import everything back from the captured sheet
+    for (const t of ["workout_sets", "workout_notes"]) getDb().exec(`DELETE FROM ${t}`);
+    const { sheets: importSheets } = makeFakeSheets(firstByTab as Record<string, unknown[][]>);
+    await importFromSheet({ sheets: importSheets as never, spreadsheetId: "SID" });
+
+    const second = makeFakeSheets();
+    await exportToSheet({ sheets: second.sheets as never, spreadsheetId: "SID" });
+    const secondByTab = Object.fromEntries(second.updates.map((u) => [u.range.split("!")[0], u.values]));
+
+    for (const block of BLOCKS) {
+      expect(secondByTab[block.name]).toEqual(firstByTab[block.name]);
+    }
   });
 });
 
