@@ -44,12 +44,26 @@ type Logged = {
   e1rm: number | null;
 };
 
+export type PrevSet = {
+  weight: number | null;
+  reps: number | null;
+  rpe: number | null;
+  prescribedRpe: number | null;
+};
+
+// "@8 (prescribed @7)" — actual RPE next to what that set called for back then.
+function prevRpeSuffix(prev: PrevSet): string {
+  if (prev.rpe == null) return "";
+  const prescribed = prev.prescribedRpe != null ? ` (prescribed @${prev.prescribedRpe})` : "";
+  return ` @${prev.rpe}${prescribed}`;
+}
+
 type Props = {
   week: number;
   day: number;
   label: string;
   exercises: SessionExercise[];
-  previous: Record<string, { weight: number | null; reps: number | null }>;
+  previous: Record<string, PrevSet>;
   completedAt: string | null;
   notes: Record<string, string>;
 };
@@ -436,7 +450,7 @@ function ExerciseCard({
 }: {
   exercise: SessionExercise;
   logged: Record<string, Logged>;
-  previous: Record<string, { weight: number | null; reps: number | null }>;
+  previous: Record<string, PrevSet>;
   week: number;
   day: number;
   barKg: number;
@@ -507,7 +521,7 @@ function ExerciseCard({
             <h3 className="text-xl font-bold text-[#f5f5f5] leading-tight">{exercise.name}</h3>
             {lastSet?.weight != null && (
               <p className="text-xs text-[#8e8e93] mt-1">
-                Last set · {lastSet.weight}kg × {lastSet.reps}
+                Last set · {lastSet.weight}kg × {lastSet.reps}{prevRpeSuffix(lastSet)}
               </p>
             )}
             <p className="text-xs text-[#8e8e93] mt-0.5">
@@ -627,7 +641,7 @@ function SetRow({
   day: number;
   barKg: number;
   logged: Logged | null;
-  prev: { weight: number | null; reps: number | null } | null;
+  prev: PrevSet | null;
   suggestedWeight: number | null;
   onLogged: (setNumber: number, value: Logged | null) => void;
   onError: (msg: string | null) => void;
@@ -764,7 +778,7 @@ function SetRow({
           </div>
           {prev?.weight != null && !isLogged && (
             <p className="text-[10px] text-[#8e8e93]/70 mt-0.5">
-              prev {kgToDisplay(prev.weight, unit)} × {prev.reps}
+              prev {kgToDisplay(prev.weight, unit)} × {prev.reps}{prevRpeSuffix(prev)}
             </p>
           )}
         </div>

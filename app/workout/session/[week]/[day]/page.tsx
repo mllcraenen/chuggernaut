@@ -18,6 +18,7 @@ import {
 } from "@/lib/workout-program";
 import SessionClient, {
   type SessionExercise,
+  type PrevSet,
 } from "@/components/workout/session-client";
 import WorkoutTabBar from "@/components/workout/workout-tab-bar";
 import SessionTimer from "@/components/workout/session-timer";
@@ -103,9 +104,14 @@ export default async function SessionPage({ params }: Params) {
   });
 
   const prevMap = getPreviousSetMap(week, day, refs);
-  const previous: Record<string, { weight: number | null; reps: number | null }> = {};
+  const previous: Record<string, PrevSet> = {};
   for (const [k, v] of Object.entries(prevMap)) {
-    previous[k] = { weight: v.actualWeight, reps: v.actualReps };
+    previous[k] = {
+      weight: v.actualWeight,
+      reps: v.actualReps,
+      rpe: v.actualRpe,
+      prescribedRpe: v.prescribedRpe,
+    };
   }
 
   const notes = getNotesForSession(week, day);
