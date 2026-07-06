@@ -43,6 +43,8 @@ import {
   TAB_TRAINING_MAXES,
   TAB_BODY_WEIGHT,
   TAB_SWAPS,
+  TAB_SESSIONS,
+  TAB_SETTINGS,
   BLOCKS,
 } from "@/lib/workout-sheets";
 import { WorkoutSheetWriter } from "@/lib/sheet-writer";
@@ -52,8 +54,15 @@ import { PROGRAM } from "@/lib/workout-program";
 const W1D1_MAIN = PROGRAM.find((d) => d.week === 1 && d.day === 1)!
   .exercises.find((e) => e.lift !== null)!;
 
-// All tabs: program block tabs + 3 non-block tabs
-const ALL_TABS = [...BLOCKS.map(b => b.name), TAB_TRAINING_MAXES, TAB_BODY_WEIGHT, TAB_SWAPS];
+// All tabs: program block tabs + bidirectional non-block tabs + export-only tabs
+const ALL_TABS = [
+  ...BLOCKS.map(b => b.name),
+  TAB_TRAINING_MAXES,
+  TAB_BODY_WEIGHT,
+  TAB_SWAPS,
+  TAB_SESSIONS,
+  TAB_SETTINGS,
+];
 
 function makeFakeSheets(getData: Record<string, unknown[][]> = {}) {
   const updates: { range: string; values: unknown[][] }[] = [];

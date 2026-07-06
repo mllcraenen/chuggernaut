@@ -21,6 +21,13 @@ export function getGoalDate(): string | null {
   return getSetting("goal_date");
 }
 
+// Goal date is sheet-exported (App Settings tab), so its mutations must flag
+// the sheet dirty — use this, not raw setSetting("goal_date", …).
+export function setGoalDate(date: string): void {
+  setSetting("goal_date", date);
+  markDirty();
+}
+
 export function getDaysOut(): { days: number; dateLabel: string } | null {
   const raw = getGoalDate();
   if (!raw) return null;
@@ -259,6 +266,7 @@ export function startSession(week: number, day: number): SessionRow {
       "INSERT INTO workout_sessions (week, day, started_at) VALUES (?, ?, ?)"
     )
     .run(week, day, now);
+  markDirty(); // sessions are sheet-exported
   return getSession(week, day)!;
 }
 

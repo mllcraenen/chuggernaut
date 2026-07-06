@@ -3,6 +3,9 @@ import { getSetting, setSetting, getTrainingMaxes, epley1rm } from "./workout";
 import { PROGRAM, PROGRAM_BLOCKS } from "./workout-program";
 import { isDirty, clearDirty, markDirty } from "./sheets-sync";
 import { WorkoutSheetWriter, type BlockDefinition } from "./sheet-writer";
+import { TAB_SESSIONS, TAB_SETTINGS, SHEET_EXPORTED_SETTINGS } from "./sync-coverage";
+
+export { TAB_SESSIONS, TAB_SETTINGS };
 
 export type { BlockDefinition };
 
@@ -43,15 +46,20 @@ export const TAB_HEADERS: Record<string, string[]> = {
     "block_end_week",
     "created_at",
   ],
+  [TAB_SESSIONS]: ["week", "day", "started_at", "completed_at"],
+  [TAB_SETTINGS]: ["key", "value"],
 };
 
-// Block tabs come first so they are the landing view.
-// Non-block tabs follow for bidirectional sync of TMs, body weight, and swaps.
+// Block tabs come first so they are the landing view. Non-block tabs follow:
+// TMs / body weight / swaps sync bidirectionally; Sessions and App Settings
+// are export-only (see lib/sync-coverage.ts) and skipped on import.
 const TAB_ORDER = [
   ...BLOCKS.map(b => b.name),
   TAB_TRAINING_MAXES,
   TAB_BODY_WEIGHT,
   TAB_SWAPS,
+  TAB_SESSIONS,
+  TAB_SETTINGS,
 ];
 
 // Block tab names for test assertions and allow-list checks.
@@ -210,6 +218,20 @@ function readTabRows(tab: string): (string | number)[][] {
         cell(r.week), cell(r.day), cell(r.block_end_week), cell(r.created_at),
       ]);
     }
+    case TAB_SESSIONS: {
+      const rows = db
+        .prepare("SELECT week, day, started_at, completed_at FROM workout_sessions ORDER BY week ASC, day ASC")
+        .all<{ week: number; day: number; started_at: string | null; completed_at: string | null }>();
+      return rows.map((r) => [cell(r.week), cell(r.day), cell(r.started_at), cell(r.completed_at)]);
+    }
+    case TAB_SETTINGS: {
+      return SHEET_EXPORTED_SETTINGS.map((key) => {
+        const row = db
+          .prepare("SELECT value FROM workout_settings WHERE key = ?")
+          .get<{ value: string }>(key);
+        return [key, cell(row?.value ?? "")];
+      });
+    }
     default:
       return [];
   }
@@ -350,6 +372,11 @@ function upsertTabRows(tab: string, rows: unknown[][], hasNotesColumn = false): 
       }
       return count;
     }
+    // Export-only tabs (lib/sync-coverage.ts): the sheet copy is a
+    // human-readable record; the DB stays authoritative. Explicitly skipped.
+    case TAB_SESSIONS:
+    case TAB_SETTINGS:
+      return 0;
     default:
       return 0;
   }

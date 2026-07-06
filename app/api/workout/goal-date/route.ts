@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
-import { getGoalDate, setSetting } from "@/lib/workout";
+import { getGoalDate, setGoalDate } from "@/lib/workout";
+import { triggerExportIfDue } from "@/lib/workout-sheets";
 
 export const dynamic = "force-dynamic";
 
@@ -18,13 +19,15 @@ export async function POST(req: NextRequest) {
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return NextResponse.json({ error: "goalDate must be YYYY-MM-DD" }, { status: 400 });
   }
-  setSetting("goal_date", date);
+  setGoalDate(date);
+  triggerExportIfDue();
   return NextResponse.json({ goalDate: date });
 }
 
 export async function DELETE() {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  setSetting("goal_date", "");
+  setGoalDate("");
+  triggerExportIfDue();
   return NextResponse.json({ ok: true });
 }

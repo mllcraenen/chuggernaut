@@ -9,7 +9,9 @@ function dbPath(): string {
   return process.env.WORKOUT_DB_PATH ?? "/home/admin/data/workout.db";
 }
 
-const SCHEMA = `
+// Exported so the sync-coverage invariant test can parse table names out of
+// it — every table must have an entry in lib/sync-coverage.ts.
+export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS workout_training_maxes (
   id INTEGER PRIMARY KEY,
   lift TEXT NOT NULL,
