@@ -266,6 +266,8 @@ function upsertTabRows(tab: string, rows: unknown[][], hasNotesColumn = false): 
     );
     const now = new Date().toISOString();
     for (const r of records) {
+      // Server-side guard (2.4): a sheet edit is client input like any other.
+      if ((r.actualWeight != null && r.actualWeight < 0) || (r.actualReps != null && r.actualReps < 1)) continue;
       const e1rm = (r.actualWeight != null && r.actualReps != null)
         ? epley1rm(r.actualWeight, r.actualReps)
         : null;

@@ -2,11 +2,9 @@ import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { logSet, deleteSet, type LogSetInput } from "@/lib/workout";
 import { triggerExportIfDue } from "@/lib/workout-sheets";
+import { PROGRAM_WEEKS as WEEKS, PROGRAM_DAYS as DAYS } from "@/lib/workout-program";
 
 export const dynamic = "force-dynamic";
-
-const WEEKS = 6;
-const DAYS = 4;
 
 function num(v: unknown): number | null {
   const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN;

@@ -220,6 +220,50 @@ describe("WorkoutSheetWriter.parseBlockRows", () => {
   });
 });
 
+// ── extra sets (beyond prescription) ──────────────────────────────────────────
+
+describe("extra logged sets", () => {
+  const maxPrescribed = Math.max(...W1D1_MAIN.sets.map((s) => s.setNumber));
+  const extraSet: SetRow = {
+    id: 9, week: 1, day: 1, exercise: W1D1_MAIN.name, setNumber: maxPrescribed + 1,
+    prescribedWeight: null, prescribedReps: null, prescribedRpe: null,
+    actualWeight: 80, actualReps: 8, actualRpe: 8, e1rm: 101.3,
+    loggedAt: "2026-06-01T10:30:00Z",
+  };
+
+  it("appends sets logged beyond the prescription with a real key and empty prescription", () => {
+    const writer = makeWriter([extraSet]);
+    const rows = writer.generateBlock(BLOCKS[0]);
+    const key = WorkoutSheetWriter.makeKey(1, 1, extraSet.setNumber, W1D1_MAIN.name);
+    const row = rows.find((r) => r[0] === key);
+    expect(row).toBeDefined();
+    expect(row![6]).toBe("");     // no prescribed cell
+    expect(row![7]).toBe(80);     // actual weight
+    expect(row![8]).toBe(8);      // actual reps
+    expect(String(row![5])).toContain("extra");
+  });
+
+  it("emits sets logged under a non-program (swapped-in) exercise name", () => {
+    const swappedSet: SetRow = { ...extraSet, exercise: "Swapped-In Movement", setNumber: 1 };
+    const writer = makeWriter([swappedSet]);
+    const rows = writer.generateBlock(BLOCKS[0]);
+    const key = WorkoutSheetWriter.makeKey(1, 1, 1, "Swapped-In Movement");
+    expect(rows.find((r) => r[0] === key)).toBeDefined();
+  });
+
+  it("extra rows round-trip through parseBlockRows", () => {
+    const writer = makeWriter([extraSet]);
+    const rows = writer.generateBlock(BLOCKS[0]);
+    const parsed = WorkoutSheetWriter.parseBlockRows(rows);
+    const found = parsed.find(
+      (r) => r.exercise === W1D1_MAIN.name && r.setNumber === extraSet.setNumber
+    );
+    expect(found).toBeDefined();
+    expect(found!.actualWeight).toBe(80);
+    expect(found!.actualReps).toBe(8);
+  });
+});
+
 // ── notes column ──────────────────────────────────────────────────────────────
 
 describe("notes column", () => {

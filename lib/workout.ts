@@ -51,8 +51,10 @@ export function isLiftId(value: unknown): value is LiftId {
 // here for server-side callers already importing from lib/workout.
 export { TM_FACTOR } from "./workout-program";
 
-// Epley estimated 1RM.
-export function epley1rm(weight: number, reps: number): number {
+// Epley estimated 1RM. Null for non-positive weight/reps — a 0 kg or
+// negative "lift" has no meaningful 1RM (bodyweight-aware e1RM lands in 3.4).
+export function epley1rm(weight: number, reps: number): number | null {
+  if (weight <= 0 || reps <= 0) return null;
   return Math.round(weight * (1 + reps / 30) * 10) / 10;
 }
 
@@ -371,6 +373,7 @@ export function deleteSet(
       "DELETE FROM workout_sets WHERE week = ? AND day = ? AND exercise = ? AND set_number = ?"
     )
     .run(week, day, exercise, setNumber);
+  if (result.changes > 0) markDirty();
   return result.changes > 0;
 }
 

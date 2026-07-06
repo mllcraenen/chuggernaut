@@ -305,6 +305,8 @@ describe("notes ↔ sheet", () => {
       { lift: "deadlift", e1rm: 220, trainingMax: 198 },
     ]);
     logSet({ week: 1, day: 1, exercise: W1D1_MAIN.name, setNumber: 1, actualWeight: 100, actualReps: 5, actualRpe: 8 });
+    // Extra set beyond the prescription must survive the round-trip too
+    logSet({ week: 1, day: 1, exercise: W1D1_MAIN.name, setNumber: 99, actualWeight: 80, actualReps: 8 });
     setNote(1, 1, W1D1_MAIN.name, "Belt on last set");
 
     const first = makeFakeSheets();
@@ -323,6 +325,61 @@ describe("notes ↔ sheet", () => {
     for (const block of BLOCKS) {
       expect(secondByTab[block.name]).toEqual(firstByTab[block.name]);
     }
+  });
+});
+
+// ---- Server-side input guards (2.4) ----
+
+describe("input guards", () => {
+  it("epley1rm returns null for non-positive weight or reps", async () => {
+    const { epley1rm } = await import("@/lib/workout");
+    expect(epley1rm(0, 5)).toBeNull();
+    expect(epley1rm(-20, 5)).toBeNull();
+    expect(epley1rm(100, 0)).toBeNull();
+    expect(epley1rm(100, 5)).toBe(116.7);
+  });
+
+  it("import skips rows with negative weight or reps < 1", async () => {
+    const { importFromSheet } = await import("@/lib/workout-sheets");
+    const { getSetsForSession } = await import("@/lib/workout");
+    const mk = (n: number) => WorkoutSheetWriter.makeKey(1, 1, n, W1D1_MAIN.name);
+    const data = {
+      [BLOCKS[0].name]: [
+        WorkoutSheetWriter.HEADER,
+        [mk(1), 1, 1, "Day", W1D1_MAIN.name, "Set 1", "", -50, 5, "", "", ""],
+        [mk(2), 1, 1, "Day", W1D1_MAIN.name, "Set 2", "", 100, 0, "", "", ""],
+        [mk(3), 1, 1, "Day", W1D1_MAIN.name, "Set 3", "", 100, 5, "", "", ""],
+      ],
+    };
+    const { sheets } = makeFakeSheets(data);
+    await importFromSheet({ sheets: sheets as never, spreadsheetId: "SHEET_ID" });
+    const sets = getSetsForSession(1, 1);
+    expect(sets.length).toBe(1);
+    expect(sets[0].setNumber).toBe(3);
+  });
+});
+
+// ---- Dirty flag on mutations ----
+
+describe("markDirty coverage", () => {
+  it("deleteSet flags the sheet as dirty", async () => {
+    const { logSet, deleteSet } = await import("@/lib/workout");
+    const { isDirty, clearDirty } = await import("@/lib/sheets-sync");
+    logSet({ week: 1, day: 1, exercise: W1D1_MAIN.name, setNumber: 1, actualWeight: 100, actualReps: 5 });
+    clearDirty();
+    expect(deleteSet(1, 1, W1D1_MAIN.name, 1)).toBe(true);
+    expect(isDirty()).toBe(true);
+  });
+
+  it("setNote and deleteNote flag the sheet as dirty", async () => {
+    const { setNote, deleteNote } = await import("@/lib/workout");
+    const { isDirty, clearDirty } = await import("@/lib/sheets-sync");
+    clearDirty();
+    setNote(1, 1, W1D1_MAIN.name, "note");
+    expect(isDirty()).toBe(true);
+    clearDirty();
+    deleteNote(1, 1, W1D1_MAIN.name);
+    expect(isDirty()).toBe(true);
   });
 });
 

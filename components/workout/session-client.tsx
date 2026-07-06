@@ -18,9 +18,10 @@ export type SessionSet = {
   setNumber: number;
   percentOfTM: number | null;
   prescribedWeight: number | null;
-  prescribedReps: number;
+  prescribedReps: number | null; // null on extra sets (no prescription)
   prescribedRpe: number | null;
   note: string | null;
+  isExtra?: boolean; // logged beyond the program's prescription
   logged: {
     actualWeight: number | null;
     actualReps: number | null;
@@ -459,11 +460,37 @@ function ExerciseCard({
   onLogged: (setNumber: number, value: Logged | null) => void;
   onError: (msg: string | null) => void;
 }) {
-  const allLogged = exercise.sets.every((s) => logged[keyOf(exercise.name, s.setNumber)]);
+  const isAccessory = exercise.lift === null;
+  const programSets = exercise.sets.filter((s) => !s.isExtra);
+  // Extra sets: persisted ones arrive via props; newly added ones live here.
+  const [extraSets, setExtraSets] = useState<SessionSet[]>(
+    exercise.sets.filter((s) => s.isExtra)
+  );
+  const allSets = [...programSets, ...extraSets];
+  const highestExtra = extraSets.length > 0 ? extraSets[extraSets.length - 1].setNumber : null;
+
+  function addExtraSet() {
+    const nextNumber = Math.max(...allSets.map((s) => s.setNumber)) + 1;
+    setExtraSets((prev) => [
+      ...prev,
+      {
+        setNumber: nextNumber,
+        percentOfTM: null,
+        prescribedWeight: null,
+        prescribedReps: null,
+        prescribedRpe: null,
+        note: null,
+        isExtra: true,
+        logged: null,
+      },
+    ]);
+  }
+
+  const allLogged = allSets.every((s) => logged[keyOf(exercise.name, s.setNumber)]);
   const lastSet = previous[keyOf(exercise.name, 1)];
 
-  const repRange = exercise.sets.length > 0
-    ? [...new Set(exercise.sets.map((s) => s.prescribedReps))]
+  const repRange = programSets.length > 0
+    ? [...new Set(programSets.map((s) => s.prescribedReps))]
         .join("–")
     : null;
 
@@ -543,7 +570,7 @@ function ExerciseCard({
 
         {/* Set rows — track last logged weight to autofill subsequent sets */}
         <div className="border-t border-[#2a3352] divide-y divide-[#2a3352]">
-          {exercise.sets.map((s) => {
+          {allSets.map((s) => {
             const prevLoggedWeight = (() => {
               for (let n = s.setNumber - 1; n >= 1; n--) {
                 const l = logged[keyOf(exercise.name, n)];
@@ -564,9 +591,25 @@ function ExerciseCard({
                 suggestedWeight={prevLoggedWeight}
                 onLogged={onLogged}
                 onError={onError}
+                // Only the highest extra set is removable — no renumbering,
+                // no _key churn in the sheet.
+                onRemove={
+                  s.isExtra && s.setNumber === highestExtra
+                    ? () => setExtraSets((prev) => prev.filter((x) => x.setNumber !== s.setNumber))
+                    : undefined
+                }
               />
             );
           })}
+          {isAccessory && (
+            <button
+              type="button"
+              onClick={addExtraSet}
+              className="w-full min-h-[44px] text-sm text-[#3d5080] hover:text-[#8e8e93] transition-colors"
+            >
+              + Add set
+            </button>
+          )}
         </div>
 
         {/* Notes footer */}
@@ -634,6 +677,7 @@ function SetRow({
   suggestedWeight,
   onLogged,
   onError,
+  onRemove,
 }: {
   exerciseName: string;
   set: SessionSet;
@@ -645,6 +689,7 @@ function SetRow({
   suggestedWeight: number | null;
   onLogged: (setNumber: number, value: Logged | null) => void;
   onError: (msg: string | null) => void;
+  onRemove?: () => void; // set on removable extra sets only
 }) {
   const { unit } = useUnit();
   const [expanded, setExpanded] = useState(false);
@@ -667,7 +712,11 @@ function SetRow({
         : toInputWeight(set.prescribedWeight)
   );
   const [reps, setReps] = useState<string>(
-    logged?.actualReps != null ? String(logged.actualReps) : String(set.prescribedReps)
+    logged?.actualReps != null
+      ? String(logged.actualReps)
+      : set.prescribedReps != null
+        ? String(set.prescribedReps)
+        : ""
   );
   const [rpe, setRpe] = useState<number>(logged?.actualRpe ?? set.prescribedRpe ?? 8);
   const [saving, setSaving] = useState(false);
@@ -794,7 +843,11 @@ function SetRow({
         ) : (
           <div className="flex-shrink-0 rounded-full bg-[#242f4a] border border-[#2a3352] px-3 py-1">
             <span className="text-xs text-[#8e8e93] whitespace-nowrap">
-              {set.prescribedRpe != null ? `RPE ${set.prescribedRpe}` : `${set.prescribedReps} reps`}
+              {set.prescribedRpe != null
+                ? `RPE ${set.prescribedRpe}`
+                : set.prescribedReps != null
+                  ? `${set.prescribedReps} reps`
+                  : "extra"}
             </span>
           </div>
         )}
@@ -871,11 +924,16 @@ function SetRow({
             >
               {saving ? "Logging…" : isLogged ? "Update set" : "Log set"}
             </button>
-            {isLogged && (
+            {(isLogged || onRemove) && (
               <button
                 type="button"
                 disabled={removing || saving}
                 onClick={async () => {
+                  // Unlogged extra set: nothing in the DB, just drop the row.
+                  if (!isLogged) {
+                    onRemove?.();
+                    return;
+                  }
                   setRemoving(true);
                   onError(null);
                   try {
@@ -889,6 +947,7 @@ function SetRow({
                     if (!res.ok) throw new Error(`Remove failed (${res.status})`);
                     onLogged(set.setNumber, null as unknown as Logged);
                     setExpanded(false);
+                    onRemove?.();
                   } catch (e) {
                     onError(e instanceof Error ? e.message : "Could not remove set");
                   } finally {

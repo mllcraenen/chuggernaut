@@ -103,6 +103,31 @@ export default async function SessionPage({ params }: Params) {
     };
   });
 
+  // Persisted extra sets (logged beyond the prescription) must survive reload.
+  for (const ex of exercises) {
+    const maxPrescribed = Math.max(0, ...ex.sets.map((s) => s.setNumber));
+    const extraRows = loggedSets
+      .filter((s) => s.loggedAt && s.exercise === ex.name && s.setNumber > maxPrescribed)
+      .sort((a, b) => a.setNumber - b.setNumber);
+    for (const s of extraRows) {
+      ex.sets.push({
+        setNumber: s.setNumber,
+        percentOfTM: null,
+        prescribedWeight: null,
+        prescribedReps: null,
+        prescribedRpe: null,
+        note: null,
+        isExtra: true,
+        logged: {
+          actualWeight: s.actualWeight,
+          actualReps: s.actualReps,
+          actualRpe: s.actualRpe,
+          e1rm: s.e1rm,
+        },
+      });
+    }
+  }
+
   const prevMap = getPreviousSetMap(week, day, refs);
   const previous: Record<string, PrevSet> = {};
   for (const [k, v] of Object.entries(prevMap)) {

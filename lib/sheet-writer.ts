@@ -106,11 +106,15 @@ export class WorkoutSheetWriter {
       // Week sub-header
       rows.push(["", session.week, session.day, session.label, "", `— Week ${session.week} —`, "", "", "", "", "", ""]);
 
+      const emittedKeys = new Set<string>();
+      const noteEmitted = new Set<string>();
+
       for (const exercise of session.exercises) {
         const note = this.notes[WorkoutSheetWriter.noteKey(session.week, session.day, exercise.name)] ?? "";
         let firstSet = true;
         for (const set of exercise.sets) {
           const key = WorkoutSheetWriter.makeKey(session.week, session.day, set.setNumber, exercise.name);
+          emittedKeys.add(key);
           const logged = this.logMap.get(key);
           rows.push([
             key,
@@ -128,6 +132,41 @@ export class WorkoutSheetWriter {
           ]);
           firstSet = false;
         }
+        if (exercise.sets.length > 0) {
+          noteEmitted.add(WorkoutSheetWriter.noteKey(session.week, session.day, exercise.name));
+        }
+      }
+
+      // Logged sets beyond the prescription (extra accessory sets, or sets
+      // logged under a swapped-in exercise name): real keys, empty
+      // prescription cells. Without this they'd silently vanish from the sheet.
+      const extras = [...this.logMap.values()]
+        .filter(s =>
+          s.week === session.week &&
+          s.day === session.day &&
+          !emittedKeys.has(WorkoutSheetWriter.makeKey(s.week, s.day, s.setNumber, s.exercise))
+        )
+        .sort((a, b) =>
+          a.exercise !== b.exercise ? a.exercise.localeCompare(b.exercise) : a.setNumber - b.setNumber
+        );
+      for (const s of extras) {
+        const nKey = WorkoutSheetWriter.noteKey(s.week, s.day, s.exercise);
+        const note = noteEmitted.has(nKey) ? "" : (this.notes[nKey] ?? "");
+        noteEmitted.add(nKey);
+        rows.push([
+          WorkoutSheetWriter.makeKey(s.week, s.day, s.setNumber, s.exercise),
+          s.week,
+          s.day,
+          session.label,
+          s.exercise,
+          `Set ${s.setNumber} (extra)`,
+          "",
+          s.actualWeight ?? "",
+          s.actualReps ?? "",
+          s.actualRpe ?? "",
+          s.e1rm ?? "",
+          note,
+        ]);
       }
     }
 
