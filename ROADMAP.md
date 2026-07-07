@@ -23,6 +23,15 @@ Phased plan for the feature/bug backlog. Ordering: bugs → small UX → exercis
 
 ---
 
+## Phase 2.6 — UX round 2 (S/M total, next up; added 2026-07-07)
+
+- **2.6.1 Wall-clock rest timer (S/M).** The timer counts down with interval ticks, so a backgrounded/blurred tab (throttled `setInterval`) desynchronizes it. Store an absolute end timestamp (`Date.now() + duration`) when the timer starts and render remaining = `end − now` on every tick/visibility change — the display self-corrects no matter how long the tab slept. (`components/workout/session-timer.tsx`.)
+- **2.6.2 Italic prev-set text (S).** The "last time" numbers (2.1's `80 kg × 5 @8 (prescribed @7)` line) render in the same style as the set description; make them italic to differentiate. (`session-client.tsx`.)
+- **2.6.3 Bold prescribed RPE (S).** Bold the prescribed RPE in the set prescription line. (`session-client.tsx`.)
+- **2.6.4 Remove unused (i) icon (S).** Drop the info icon that does nothing. (`session-client.tsx` / session UI.)
+- **2.6.5 Configurable TM factor (M).** Settings screen text claims TM is auto-calculated at 90 % but the code uses `TM_FACTOR = 0.88`. Make the factor a `workout_settings` key (default 0.88) editable in settings; both the display text and the e1RM→TM calculation read it. Server-side: same seam as `TM_FACTOR` in `lib/workout-program.ts` — the setting overrides the constant, one getter used everywhere (no component-local factors, per 1.2's test). New settings key needs a sync-coverage registry decision (2.5 scaffold enforces this).
+- **2.6.6 Anton + Inter fonts (S).** Anton (heavy condensed display) for headings/hero numbers, Inter for body text, both via `next/font/google` (self-hosted at build time, no runtime CDN dependency). Decided 2026-07-07 — replaces the original Bevan idea (display slab, too heavy for body copy). Anton is headings-only; body stays Inter for legibility.
+
 ## Phase 0 — Trivia (S)
 
 - **0.1** ~~Delete `__tests__/files.test.ts`~~ **Done on main** (PR #2 removed it).
