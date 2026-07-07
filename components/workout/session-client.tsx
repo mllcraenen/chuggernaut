@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/base-path";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LiftId } from "@/lib/workout";
@@ -144,7 +145,7 @@ function SessionInner({
 
   useEffect(() => {
     try {
-      fetch(`/api/workout/settings?key=${BAR_WEIGHT_KEY}`)
+      fetch(apiUrl(`/api/workout/settings?key=${BAR_WEIGHT_KEY}`))
         .then((r) => r.ok ? r.json() : null)
         .then((data) => {
           const n = Number(data?.value);
@@ -199,7 +200,7 @@ function SessionInner({
   // Mark the session complete (or undo) on the server and refresh.
   const finalizeSession = useCallback(
     async (action: "complete" | "uncomplete") => {
-      const res = await fetch(`/api/workout/sessions/${week}/${day}`, {
+      const res = await fetch(apiUrl(`/api/workout/sessions/${week}/${day}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
@@ -210,7 +211,7 @@ function SessionInner({
       // After completing a session, push the latest data to the Google Sheet
       // in the background (best-effort — sync may not be configured).
       if (action === "complete") {
-        fetch("/api/workout/sheets/export", { method: "POST" }).catch(() => {});
+        fetch(apiUrl("/api/workout/sheets/export"), { method: "POST" }).catch(() => {});
       }
       router.refresh();
     },
@@ -226,7 +227,7 @@ function SessionInner({
       setError(null);
       try {
         if (acceptedLifts.length > 0) {
-          const tmRes = await fetch("/api/workout/training-maxes");
+          const tmRes = await fetch(apiUrl("/api/workout/training-maxes"));
           if (tmRes.ok) {
             const tmData = await tmRes.json();
             const current = (tmData?.trainingMaxes ?? {}) as Record<
@@ -246,7 +247,7 @@ function SessionInner({
               }
               return { lift: cur.lift, e1rm: cur.e1rm, trainingMax: cur.trainingMax };
             });
-            await fetch("/api/workout/training-maxes", {
+            await fetch(apiUrl("/api/workout/training-maxes"), {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ maxes, autoLifts: acceptedLifts }),
@@ -281,7 +282,7 @@ function SessionInner({
     // Complete path — first ask the server for TM suggestions.
     setFinishing(true);
     try {
-      const res = await fetch("/api/workout/autoregulate", {
+      const res = await fetch(apiUrl("/api/workout/autoregulate"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ week, day }),
@@ -501,7 +502,7 @@ function ExerciseCard({
   async function saveNote() {
     setNoteSaving(true);
     try {
-      const res = await fetch("/api/workout/notes", {
+      const res = await fetch(apiUrl("/api/workout/notes"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ week, day, exercise: exercise.name, note: noteText }),
@@ -524,7 +525,7 @@ function ExerciseCard({
         day: String(day),
         exercise: exercise.name,
       });
-      const res = await fetch(`/api/workout/notes?${params}`, { method: "DELETE" });
+      const res = await fetch(apiUrl(`/api/workout/notes?${params}`), { method: "DELETE" });
       if (!res.ok) throw new Error(`Delete failed (${res.status})`);
       setNoteText("");
       onNoteChange(null);
@@ -731,7 +732,7 @@ function SetRow({
     onError(null);
     setSaving(true);
     try {
-      const res = await fetch("/api/workout/sets", {
+      const res = await fetch(apiUrl("/api/workout/sets"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -943,7 +944,7 @@ function SetRow({
                       exercise: exerciseName,
                       setNumber: String(set.setNumber),
                     });
-                    const res = await fetch(`/api/workout/sets?${params}`, { method: "DELETE" });
+                    const res = await fetch(apiUrl(`/api/workout/sets?${params}`), { method: "DELETE" });
                     if (!res.ok) throw new Error(`Remove failed (${res.status})`);
                     onLogged(set.setNumber, null as unknown as Logged);
                     setExpanded(false);

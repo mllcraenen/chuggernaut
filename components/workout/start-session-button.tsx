@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/base-path";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -14,7 +15,7 @@ export default function StartSessionButton({ week, day }: { week: number; day: n
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/workout/sessions", {
+      const res = await fetch(apiUrl("/api/workout/sessions"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ week, day }),

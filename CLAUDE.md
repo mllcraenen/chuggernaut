@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Chuggernaut is a standalone Next.js app for tracking a 6-week powerlifting program ("Monolith Meet Prep v7", see `lib/workout-program.ts`). It was extracted from a sibling project (`tools-portal`) and shares that project's stack, auth pattern, and SQLite conventions but is otherwise independent — separate DB, separate Docker container, no public subdomain.
+Chuggernaut is a standalone Next.js app for tracking a 6-week powerlifting program ("Monolith Meet Prep v7", see `lib/workout-program.ts`). It was extracted from a sibling project (`tools-portal`) and shares that project's stack, auth pattern, and SQLite conventions, running as a separate Docker container on port 3003. The workout-code fork that used to live inside tools-portal was deleted (2026-07-07) — **this repo is the only workout app**. DB is `/home/admin/data/workout.db` (`WORKOUT_DB_PATH` in docker-compose).
+
+**The public URL is `https://tools.marijncraenen.nl/tools/workout`** — Caddy (`/etc/caddy/Caddyfile`) has a `handle /tools/workout*` directive in the `tools.marijncraenen.nl` block proxying to port 3003, ahead of the catch-all to tools-portal. The app is built with Next.js `basePath: "/tools/workout"`; `lib/base-path.ts` is the single source of truth, and client-side `fetch()` calls must go through its `apiUrl()` helper because basePath is not applied to fetch. `AUTH_URL` in `.env` stays origin-only (`https://tools.marijncraenen.nl`) — Auth.js sees basePath-stripped paths — and `signIn`/`signOut` `redirectTo` values need the explicit `BASE_PATH` prefix. **No change counts as live until it is testable at that public URL**; `localhost:3003` checks alone do not count.
 
 ## Commands
 
@@ -24,11 +26,11 @@ docker compose logs chuggernaut --tail=30
 
 Test the Sheets export/import without going through the UI/auth:
 ```bash
-curl -s -H "X-Internal-Token: chuggernaut-internal" "http://localhost:3003/api/internal/sync?action=export"
-curl -s -H "X-Internal-Token: chuggernaut-internal" "http://localhost:3003/api/internal/sync?action=import"
+curl -s -H "X-Internal-Token: chuggernaut-internal" "http://localhost:3003/tools/workout/api/internal/sync?action=export"
+curl -s -H "X-Internal-Token: chuggernaut-internal" "http://localhost:3003/tools/workout/api/internal/sync?action=import"
 ```
 
-**Known failing tests (program-swap fallout):** the warmup label test and several sheet-writer/workout-sheets tests still assert the old Calgary Barbell program's exercise names, labels, and 16-week block layout; the current program is the 6-week Monolith Meet Prep. These are tracked in `ROADMAP.md` Phase 1 (items 1.4, 1.8) — fix them with program-agnostic assertions, not by re-hardcoding the new names.
+The program-swap test fallout (ROADMAP.md Phase 1) is fixed: the suite passes with program-agnostic assertions. Keep new tests structural — derive expectations from `lib/workout-program.ts` rather than hardcoding exercise names or block layouts.
 
 ## Architecture
 
@@ -47,7 +49,7 @@ curl -s -H "X-Internal-Token: chuggernaut-internal" "http://localhost:3003/api/i
 
 Tabs are block tabs (one per 4-week block, generated from `CB16_BLOCKS`/`BlockDefinition[]`) plus fixed non-block tabs for Training Maxes, Body Weight, and Swaps (`TAB_HEADERS`). `WorkoutSheetWriter` takes `BlockDefinition[]` as a constructor arg, so a different program's block layout can reuse the same writer.
 
-**Internal sync route (`app/api/internal/sync/route.ts`)** bypasses Auth.js entirely via a hardcoded `X-Internal-Token` header check — this is safe only because port 3003 has no Caddy entry and is not reachable off the VPS. `middleware.ts` explicitly excludes `/api/internal` from the auth gate for this reason.
+**Internal sync route (`app/api/internal/sync/route.ts`)** bypasses Auth.js entirely via a hardcoded `X-Internal-Token` header check — this is safe only because Caddy returns 403 for `/tools/workout/api/internal*` before proxying (see `/etc/caddy/Caddyfile`) — the route is reachable only via `localhost:3003` on the VPS. `middleware.ts` explicitly excludes `/api/internal` from the auth gate for this reason.
 
 **Client/server split for sessions.** `app/workout/session/[week]/[day]/page.tsx` (server) resolves program data, swaps, notes, and previous-session numbers, then hands a plain-data props object to `components/workout/session-client.tsx` ("use client") which owns all interactive logging state, unit conversion (`lib/units.ts`, kg is canonical storage unit, lbs is display-only via `UnitProvider`/`unit-context.tsx`), and plate math (`lib/plate-calculator.ts`).
 

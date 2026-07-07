@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/base-path";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { TM_FACTOR } from "@/lib/workout-program";
@@ -59,7 +60,7 @@ export default function OnboardingForm() {
         e1rm: Number(entries[l.id].e1rm),
         trainingMax: Number(entries[l.id].tm),
       }));
-      const res = await fetch("/api/workout/training-maxes", {
+      const res = await fetch(apiUrl("/api/workout/training-maxes"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ maxes }),

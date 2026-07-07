@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/base-path";
 import { useState } from "react";
 
 type SyncState = "idle" | "syncing" | "error";
@@ -40,7 +41,7 @@ export default function SheetsSyncForm({
     setState("syncing");
     setMessage(null);
     try {
-      const res = await fetch("/api/workout/sheets/config", {
+      const res = await fetch(apiUrl("/api/workout/sheets/config"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ credentials: creds, spreadsheetId: sheetId }),
@@ -61,7 +62,7 @@ export default function SheetsSyncForm({
     setState("syncing");
     setMessage(null);
     try {
-      const res = await fetch(`/api/workout/sheets/${direction}`, { method: "POST" });
+      const res = await fetch(apiUrl(`/api/workout/sheets/${direction}`), { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error ?? `Failed (${res.status})`);
       if (data?.lastSync) setSyncedAt(data.lastSync);

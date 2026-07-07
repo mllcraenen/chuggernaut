@@ -1,5 +1,6 @@
 import { signOut } from "@/auth";
 import Link from "next/link";
+import { BASE_PATH } from "@/lib/base-path";
 
 export default function Nav() {
   return (
@@ -10,7 +11,9 @@ export default function Nav() {
       <form
         action={async () => {
           "use server";
-          await signOut({ redirectTo: "/login" });
+          // Auth.js redirects resolve against AUTH_URL's origin, not Next's
+          // basePath, so the prefix must be explicit.
+          await signOut({ redirectTo: `${BASE_PATH}/login` });
         }}
       >
         <button

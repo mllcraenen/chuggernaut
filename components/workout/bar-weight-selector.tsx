@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/base-path";
 import { useEffect, useState } from "react";
 
 const BAR_WEIGHT_KEY = "bar_weight";
@@ -20,7 +21,7 @@ export default function BarWeightSelector({ initial }: { initial: number }) {
     setSaved(false);
     setSaving(true);
     try {
-      await fetch("/api/workout/settings", {
+      await fetch(apiUrl("/api/workout/settings"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key: BAR_WEIGHT_KEY, value: String(kg) }),

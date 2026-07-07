@@ -1,6 +1,7 @@
 import { signIn } from "@/auth";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { BASE_PATH } from "@/lib/base-path";
 
 export default async function LoginPage() {
   const session = await auth();
@@ -23,7 +24,9 @@ export default async function LoginPage() {
             await signIn("credentials", {
               username: formData.get("username"),
               password: formData.get("password"),
-              redirectTo: "/",
+              // Auth.js resolves this against AUTH_URL's origin and knows
+              // nothing about Next's basePath, so the prefix must be explicit.
+              redirectTo: `${BASE_PATH}/workout`,
             });
           }}
         >
