@@ -3,7 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import {
   getTrainingMaxes,
-  startSession,
+  getSession,
   getSetsForSession,
   getPreviousSetMap,
   getSwapsForSession,
@@ -18,6 +18,7 @@ import {
 } from "@/lib/workout-program";
 import SessionClient, {
   type SessionExercise,
+  type PrevSet,
 } from "@/components/workout/session-client";
 import WorkoutTabBar from "@/components/workout/workout-tab-bar";
 import SessionTimer from "@/components/workout/session-timer";
@@ -51,8 +52,9 @@ export default async function SessionPage({ params }: Params) {
   if (!programDay) notFound();
 
   const tms = getTrainingMaxes();
-  // Mark session as started immediately on page load (explicit session start)
-  const sessionRow = startSession(week, day);
+  // Sessions are started explicitly from the preview screen — never on render.
+  const sessionRow = getSession(week, day);
+  if (!sessionRow?.startedAt) redirect(`/workout/preview/${week}/${day}`);
   const loggedSets = getSetsForSession(week, day);
 
   // Map logged rows by "<exercise>#<setNumber>" for quick lookup.
@@ -101,10 +103,40 @@ export default async function SessionPage({ params }: Params) {
     };
   });
 
+  // Persisted extra sets (logged beyond the prescription) must survive reload.
+  for (const ex of exercises) {
+    const maxPrescribed = Math.max(0, ...ex.sets.map((s) => s.setNumber));
+    const extraRows = loggedSets
+      .filter((s) => s.loggedAt && s.exercise === ex.name && s.setNumber > maxPrescribed)
+      .sort((a, b) => a.setNumber - b.setNumber);
+    for (const s of extraRows) {
+      ex.sets.push({
+        setNumber: s.setNumber,
+        percentOfTM: null,
+        prescribedWeight: null,
+        prescribedReps: null,
+        prescribedRpe: null,
+        note: null,
+        isExtra: true,
+        logged: {
+          actualWeight: s.actualWeight,
+          actualReps: s.actualReps,
+          actualRpe: s.actualRpe,
+          e1rm: s.e1rm,
+        },
+      });
+    }
+  }
+
   const prevMap = getPreviousSetMap(week, day, refs);
-  const previous: Record<string, { weight: number | null; reps: number | null }> = {};
+  const previous: Record<string, PrevSet> = {};
   for (const [k, v] of Object.entries(prevMap)) {
-    previous[k] = { weight: v.actualWeight, reps: v.actualReps };
+    previous[k] = {
+      weight: v.actualWeight,
+      reps: v.actualReps,
+      rpe: v.actualRpe,
+      prescribedRpe: v.prescribedRpe,
+    };
   }
 
   const notes = getNotesForSession(week, day);

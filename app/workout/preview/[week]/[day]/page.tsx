@@ -1,7 +1,8 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { isOnboarded, getTrainingMaxes } from "@/lib/workout";
+import { isOnboarded, getTrainingMaxes, getSession } from "@/lib/workout";
+import StartSessionButton from "@/components/workout/start-session-button";
 import {
   getProgramDay,
   prescribedWeight,
@@ -10,7 +11,7 @@ import {
 } from "@/lib/workout-program";
 import WorkoutTabBar from "@/components/workout/workout-tab-bar";
 import WarmupChecklist from "@/components/workout/warmup-checklist";
-import { getWarmup } from "@/lib/warmup-routines";
+import { getWarmupForDay } from "@/lib/warmup-routines";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,9 @@ export default async function PreviewPage({ params }: Params) {
   if (!programDay) notFound();
 
   const tms = getTrainingMaxes();
-  const warmup = getWarmup(programDay.label);
+  const warmup = getWarmupForDay(programDay);
+  const sessionRow = getSession(week, day);
+  const started = Boolean(sessionRow?.startedAt);
 
   // Prev / next for navigation arrows
   const totalDays = PROGRAM_WEEKS * PROGRAM_DAYS;
@@ -80,12 +83,16 @@ export default async function PreviewPage({ params }: Params) {
 
       <main className="max-w-md mx-auto w-full px-4 py-5 pb-28 space-y-4">
         {/* CTAs */}
-        <Link
-          href={`/workout/session/${week}/${day}`}
-          className="flex items-center justify-center gap-2 w-full min-h-[56px] rounded-xl bg-[#e84545] text-white font-semibold text-lg hover:bg-[#d33a3a] transition-colors"
-        >
-          Start Training →
-        </Link>
+        {started ? (
+          <Link
+            href={`/workout/session/${week}/${day}`}
+            className="flex items-center justify-center gap-2 w-full min-h-[56px] rounded-xl bg-[#e84545] text-white font-semibold text-lg hover:bg-[#d33a3a] transition-colors"
+          >
+            {sessionRow?.completedAt ? "Review session →" : "Continue Training →"}
+          </Link>
+        ) : (
+          <StartSessionButton week={week} day={day} />
+        )}
         <div className="flex gap-3">
           <Link
             href="/workout"
@@ -93,12 +100,14 @@ export default async function PreviewPage({ params }: Params) {
           >
             Skip workout
           </Link>
-          <Link
-            href={`/workout/session/${week}/${day}`}
-            className="flex-1 flex items-center justify-center min-h-[44px] rounded-xl border border-[#2a3352] bg-[#1e2740] text-[#8e8e93] text-sm font-medium hover:text-[#f5f5f5] hover:bg-[#242f4a] transition-colors"
-          >
-            Go to log
-          </Link>
+          {started && (
+            <Link
+              href={`/workout/session/${week}/${day}`}
+              className="flex-1 flex items-center justify-center min-h-[44px] rounded-xl border border-[#2a3352] bg-[#1e2740] text-[#8e8e93] text-sm font-medium hover:text-[#f5f5f5] hover:bg-[#242f4a] transition-colors"
+            >
+              Go to log
+            </Link>
+          )}
         </div>
 
         {/* Warm-up */}

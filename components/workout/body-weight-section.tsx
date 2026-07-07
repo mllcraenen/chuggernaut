@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/base-path";
 import { useMemo, useState } from "react";
 import { UnitProvider, useUnit } from "@/components/workout/unit-context";
 import { kgToDisplay, displayToKg, unitLabel } from "@/lib/units";
@@ -55,7 +56,7 @@ function BodyWeightInner({ initial }: { initial: BodyWeightPoint[] }) {
     const weightKg = displayToKg(val, unit);
     setSaving(true);
     try {
-      const res = await fetch("/api/workout/body-weight", {
+      const res = await fetch(apiUrl("/api/workout/body-weight"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date, weightKg }),

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Chuggernaut",
-  description: "Calgary Barbell powerlifting tracker",
+  description: "Monolith Meet Prep v7 — Lichtstad Cup powerlifting tracker",
 };
 
 export default function RootLayout({

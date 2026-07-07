@@ -1,19 +1,24 @@
 import { describe, it, expect } from "vitest";
 import { WorkoutSheetWriter } from "@/lib/sheet-writer";
 import type { BlockDefinition } from "@/lib/sheet-writer";
-import { PROGRAM } from "@/lib/workout-program";
-import { CB16_BLOCKS } from "@/lib/workout-sheets";
+import { PROGRAM, PROGRAM_WEEKS } from "@/lib/workout-program";
+import { BLOCKS } from "@/lib/workout-sheets";
 import type { TrainingMax, SetRow } from "@/lib/workout";
 
 const MOCK_TMS: Record<string, TrainingMax> = {
   squat:    { lift: "squat",    e1rm: 200, trainingMax: 180, setAt: "2026-01-01T00:00:00Z" },
   bench:    { lift: "bench",    e1rm: 140, trainingMax: 126, setAt: "2026-01-01T00:00:00Z" },
   deadlift: { lift: "deadlift", e1rm: 240, trainingMax: 216, setAt: "2026-01-01T00:00:00Z" },
-  ohp:      { lift: "ohp",      e1rm: 90,  trainingMax: 81,  setAt: "2026-01-01T00:00:00Z" },
 };
 
+// Program-agnostic fixtures (design principle 1: no hardcoded exercise names).
+const W1D1 = PROGRAM.find((d) => d.week === 1 && d.day === 1)!;
+const W1D1_MAIN = W1D1.exercises.find((e) => e.lift !== null)!;
+const W2D1_MAIN = PROGRAM.find((d) => d.week === 2 && d.day === 1)!
+  .exercises.find((e) => e.lift !== null)!;
+
 function makeWriter(loggedSets: SetRow[] = []) {
-  return new WorkoutSheetWriter(PROGRAM, CB16_BLOCKS, MOCK_TMS, loggedSets);
+  return new WorkoutSheetWriter(PROGRAM, BLOCKS, MOCK_TMS, loggedSets);
 }
 
 // ── parseKey ──────────────────────────────────────────────────────────────────
@@ -58,19 +63,15 @@ describe("WorkoutSheetWriter.parseKey", () => {
 // ── prescribedLabel ───────────────────────────────────────────────────────────
 
 describe("WorkoutSheetWriter.prescribedLabel", () => {
-  const squat = PROGRAM.find(d => d.week === 1 && d.day === 1)!
-    .exercises.find(e => e.lift === "squat")!;
+  const mainSet = W1D1_MAIN.sets[0];
 
   it("formats main lift set with calculated weight", () => {
-    const set = squat.sets[0]; // Top set, should have percentOfTM
-    const label = WorkoutSheetWriter.prescribedLabel(set, squat, MOCK_TMS);
-    expect(label).toMatch(/kg × \d+ @RPE/);
-    expect(label).toContain("kg");
+    const label = WorkoutSheetWriter.prescribedLabel(mainSet, W1D1_MAIN, MOCK_TMS);
+    expect(label).toMatch(/kg × \d+/);
   });
 
   it("formats accessory set (no weight)", () => {
-    const day1 = PROGRAM.find(d => d.week === 1 && d.day === 1)!;
-    const accessory = day1.exercises.find(e => e.lift === null);
+    const accessory = W1D1.exercises.find((e) => e.lift === null);
     if (!accessory) return; // skip if no accessory in day 1
     const set = accessory.sets[0];
     const label = WorkoutSheetWriter.prescribedLabel(set, accessory, MOCK_TMS);
@@ -78,10 +79,11 @@ describe("WorkoutSheetWriter.prescribedLabel", () => {
     expect(label).not.toContain("kg ×");
   });
 
-  it("falls back to percentage when TM missing", () => {
-    const set = squat.sets[0];
-    const label = WorkoutSheetWriter.prescribedLabel(set, squat, {});
-    expect(label).toMatch(/%/);
+  it("falls back to the whole-number percentage when TM missing", () => {
+    const label = WorkoutSheetWriter.prescribedLabel(mainSet, W1D1_MAIN, {});
+    // percentOfTM is already a whole number — "52%", never "5200%"
+    expect(label).toContain(`${Math.round(mainSet.percentOfTM!)}%`);
+    expect(label).not.toMatch(/\d{4,}%/);
   });
 });
 
@@ -90,15 +92,14 @@ describe("WorkoutSheetWriter.prescribedLabel", () => {
 describe("WorkoutSheetWriter.generateBlock", () => {
   it("produces rows for all sessions in the block", () => {
     const writer = makeWriter();
-    const rows = writer.generateBlock(CB16_BLOCKS[0]); // W1–4
-    // Must contain at least one data row per session
+    const rows = writer.generateBlock(BLOCKS[0]);
     const dataRows = rows.filter(r => WorkoutSheetWriter.parseKey(r[0]) !== null);
     expect(dataRows.length).toBeGreaterThan(0);
   });
 
   it("every data row has a parseable key", () => {
     const writer = makeWriter();
-    for (const block of CB16_BLOCKS) {
+    for (const block of BLOCKS) {
       const rows = writer.generateBlock(block);
       const dataRows = rows.filter(r => WorkoutSheetWriter.parseKey(r[0]) !== null);
       for (const row of dataRows) {
@@ -111,7 +112,7 @@ describe("WorkoutSheetWriter.generateBlock", () => {
 
   it("separator rows have empty key column", () => {
     const writer = makeWriter();
-    const rows = writer.generateBlock(CB16_BLOCKS[0]);
+    const rows = writer.generateBlock(BLOCKS[0]);
     const separators = rows.filter(r => WorkoutSheetWriter.parseKey(r[0]) === null);
     expect(separators.length).toBeGreaterThan(0);
     for (const sep of separators) {
@@ -121,14 +122,14 @@ describe("WorkoutSheetWriter.generateBlock", () => {
 
   it("fills in logged actual values for completed sets", () => {
     const loggedSet: SetRow = {
-      id: 1, week: 1, day: 1, exercise: "Competition Squat", setNumber: 1,
+      id: 1, week: 1, day: 1, exercise: W1D1_MAIN.name, setNumber: 1,
       prescribedWeight: 90, prescribedReps: 5, prescribedRpe: 7,
       actualWeight: 92.5, actualReps: 5, actualRpe: 7.5, e1rm: 107.3,
       loggedAt: "2026-06-01T10:00:00Z",
     };
-    const writer = new WorkoutSheetWriter(PROGRAM, CB16_BLOCKS, MOCK_TMS, [loggedSet]);
-    const rows = writer.generateBlock(CB16_BLOCKS[0]);
-    const key = WorkoutSheetWriter.makeKey(1, 1, 1, "Competition Squat");
+    const writer = makeWriter([loggedSet]);
+    const rows = writer.generateBlock(BLOCKS[0]);
+    const key = WorkoutSheetWriter.makeKey(1, 1, 1, W1D1_MAIN.name);
     const row = rows.find(r => r[0] === key);
     expect(row).toBeDefined();
     expect(row![7]).toBe(92.5);   // actual weight
@@ -139,7 +140,7 @@ describe("WorkoutSheetWriter.generateBlock", () => {
 
   it("leaves actual columns blank for unlogged sets", () => {
     const writer = makeWriter(); // no logged sets
-    const rows = writer.generateBlock(CB16_BLOCKS[0]);
+    const rows = writer.generateBlock(BLOCKS[0]);
     const dataRows = rows.filter(r => WorkoutSheetWriter.parseKey(r[0]) !== null);
     for (const row of dataRows) {
       expect(row[7]).toBe("");  // actual weight blank
@@ -147,19 +148,25 @@ describe("WorkoutSheetWriter.generateBlock", () => {
     }
   });
 
-  it("covers all 4 blocks without overlap", () => {
+  it("covers every program week across blocks without overlap", () => {
     const writer = makeWriter();
     const allWeeks: number[] = [];
-    for (const block of CB16_BLOCKS) {
+    for (const block of BLOCKS) {
       const rows = writer.generateBlock(block);
       const dataRows = rows.filter(r => WorkoutSheetWriter.parseKey(r[0]) !== null);
       for (const row of dataRows) {
         allWeeks.push(row[1] as number);
       }
     }
-    // All 16 weeks should appear
     const uniqueWeeks = new Set(allWeeks);
-    for (let w = 1; w <= 16; w++) expect(uniqueWeeks.has(w)).toBe(true);
+    for (let w = 1; w <= PROGRAM_WEEKS; w++) expect(uniqueWeeks.has(w)).toBe(true);
+    // No block claims a week outside the program
+    for (const block of BLOCKS) {
+      for (const w of block.weeks) {
+        expect(w).toBeGreaterThanOrEqual(1);
+        expect(w).toBeLessThanOrEqual(PROGRAM_WEEKS);
+      }
+    }
   });
 });
 
@@ -197,19 +204,121 @@ describe("WorkoutSheetWriter.parseBlockRows", () => {
 
   it("round-trips: generate then parse restores logged values", () => {
     const loggedSet: SetRow = {
-      id: 1, week: 2, day: 1, exercise: "Competition Squat", setNumber: 1,
+      id: 1, week: 2, day: 1, exercise: W2D1_MAIN.name, setNumber: 1,
       prescribedWeight: 95, prescribedReps: 5, prescribedRpe: 7,
       actualWeight: 97.5, actualReps: 5, actualRpe: 8, e1rm: 113,
       loggedAt: "2026-06-02T10:00:00Z",
     };
-    const writer = new WorkoutSheetWriter(PROGRAM, CB16_BLOCKS, MOCK_TMS, [loggedSet]);
-    const rows = writer.generateBlock(CB16_BLOCKS[0]);
+    const writer = makeWriter([loggedSet]);
+    const rows = writer.generateBlock(BLOCKS[0]);
     const parsed = WorkoutSheetWriter.parseBlockRows(rows);
-    const found = parsed.find(r => r.week === 2 && r.day === 1 && r.exercise === "Competition Squat" && r.setNumber === 1);
+    const found = parsed.find(r => r.week === 2 && r.day === 1 && r.exercise === W2D1_MAIN.name && r.setNumber === 1);
     expect(found).toBeDefined();
     expect(found!.actualWeight).toBe(97.5);
     expect(found!.actualReps).toBe(5);
     expect(found!.actualRpe).toBe(8);
+  });
+});
+
+// ── extra sets (beyond prescription) ──────────────────────────────────────────
+
+describe("extra logged sets", () => {
+  const maxPrescribed = Math.max(...W1D1_MAIN.sets.map((s) => s.setNumber));
+  const extraSet: SetRow = {
+    id: 9, week: 1, day: 1, exercise: W1D1_MAIN.name, setNumber: maxPrescribed + 1,
+    prescribedWeight: null, prescribedReps: null, prescribedRpe: null,
+    actualWeight: 80, actualReps: 8, actualRpe: 8, e1rm: 101.3,
+    loggedAt: "2026-06-01T10:30:00Z",
+  };
+
+  it("appends sets logged beyond the prescription with a real key and empty prescription", () => {
+    const writer = makeWriter([extraSet]);
+    const rows = writer.generateBlock(BLOCKS[0]);
+    const key = WorkoutSheetWriter.makeKey(1, 1, extraSet.setNumber, W1D1_MAIN.name);
+    const row = rows.find((r) => r[0] === key);
+    expect(row).toBeDefined();
+    expect(row![6]).toBe("");     // no prescribed cell
+    expect(row![7]).toBe(80);     // actual weight
+    expect(row![8]).toBe(8);      // actual reps
+    expect(String(row![5])).toContain("extra");
+  });
+
+  it("emits sets logged under a non-program (swapped-in) exercise name", () => {
+    const swappedSet: SetRow = { ...extraSet, exercise: "Swapped-In Movement", setNumber: 1 };
+    const writer = makeWriter([swappedSet]);
+    const rows = writer.generateBlock(BLOCKS[0]);
+    const key = WorkoutSheetWriter.makeKey(1, 1, 1, "Swapped-In Movement");
+    expect(rows.find((r) => r[0] === key)).toBeDefined();
+  });
+
+  it("extra rows round-trip through parseBlockRows", () => {
+    const writer = makeWriter([extraSet]);
+    const rows = writer.generateBlock(BLOCKS[0]);
+    const parsed = WorkoutSheetWriter.parseBlockRows(rows);
+    const found = parsed.find(
+      (r) => r.exercise === W1D1_MAIN.name && r.setNumber === extraSet.setNumber
+    );
+    expect(found).toBeDefined();
+    expect(found!.actualWeight).toBe(80);
+    expect(found!.actualReps).toBe(8);
+  });
+});
+
+// ── notes column ──────────────────────────────────────────────────────────────
+
+describe("notes column", () => {
+  const NOTE = "Keep bracing tight";
+  const notes = { [WorkoutSheetWriter.noteKey(1, 1, W1D1_MAIN.name)]: NOTE };
+  const writer = new WorkoutSheetWriter(PROGRAM, BLOCKS, MOCK_TMS, [], notes);
+  const rows = writer.generateBlock(BLOCKS[0]);
+
+  it("Notes is the last header column (appended right — round-trip rule)", () => {
+    expect(WorkoutSheetWriter.HEADER[WorkoutSheetWriter.HEADER.length - 1]).toBe("Notes");
+    expect(WorkoutSheetWriter.NOTES_COL).toBe(WorkoutSheetWriter.HEADER.length - 1);
+  });
+
+  it("renders the note on the exercise's first set row only", () => {
+    const exRows = rows.filter((r) => {
+      const p = WorkoutSheetWriter.parseKey(r[0]);
+      return p !== null && p.week === 1 && p.day === 1 && p.exercise === W1D1_MAIN.name;
+    });
+    expect(exRows.length).toBeGreaterThan(1);
+    expect(exRows[0][WorkoutSheetWriter.NOTES_COL]).toBe(NOTE);
+    for (const r of exRows.slice(1)) {
+      expect(r[WorkoutSheetWriter.NOTES_COL]).toBe("");
+    }
+  });
+
+  it("all other data rows have an empty notes cell", () => {
+    for (const r of rows) {
+      const p = WorkoutSheetWriter.parseKey(r[0]);
+      if (p === null || (p.week === 1 && p.day === 1 && p.exercise === W1D1_MAIN.name)) continue;
+      expect(r[WorkoutSheetWriter.NOTES_COL]).toBe("");
+    }
+  });
+
+  it("parseBlockNotes reads the first-set row per exercise, empties included", () => {
+    const parsed = WorkoutSheetWriter.parseBlockNotes(rows);
+    const withNote = parsed.find(
+      (n) => n.week === 1 && n.day === 1 && n.exercise === W1D1_MAIN.name
+    );
+    expect(withNote?.note).toBe(NOTE);
+    // Every other (week, day, exercise) combo reports an empty note
+    for (const n of parsed) {
+      if (n.week === 1 && n.day === 1 && n.exercise === W1D1_MAIN.name) continue;
+      expect(n.note).toBe("");
+    }
+    // One entry per combo, not per set row
+    const keys = parsed.map((n) => WorkoutSheetWriter.noteKey(n.week, n.day, n.exercise));
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("notes round-trip: generate → parseBlockNotes recovers the input map", () => {
+    const recovered: Record<string, string> = {};
+    for (const n of WorkoutSheetWriter.parseBlockNotes(rows)) {
+      if (n.note) recovered[WorkoutSheetWriter.noteKey(n.week, n.day, n.exercise)] = n.note;
+    }
+    expect(recovered).toEqual(notes);
   });
 });
 
@@ -218,7 +327,7 @@ describe("WorkoutSheetWriter.parseBlockRows", () => {
 describe("WorkoutSheetWriter.tabNames", () => {
   it("returns block names in order", () => {
     const writer = makeWriter();
-    expect(writer.tabNames()).toEqual(CB16_BLOCKS.map(b => b.name));
+    expect(writer.tabNames()).toEqual(BLOCKS.map(b => b.name));
   });
 
   it("works with a custom block definition", () => {

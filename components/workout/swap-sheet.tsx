@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/base-path";
 import { useEffect, useState } from "react";
 
 type SwapScope = "day" | "block";
@@ -20,7 +21,7 @@ export default function SwapSheet({ exercise, week, day, isSwapped, onSwapped }:
 
   useEffect(() => {
     if (!open) return;
-    fetch(`/api/workout/swaps?exercise=${encodeURIComponent(exercise)}`)
+    fetch(apiUrl(`/api/workout/swaps?exercise=${encodeURIComponent(exercise)}`))
       .then((r) => r.json())
       .then((d) => setAlternatives(d.alternatives ?? []))
       .catch(() => setAlternatives([]));
@@ -30,7 +31,7 @@ export default function SwapSheet({ exercise, week, day, isSwapped, onSwapped }:
     if (!selected) return;
     setLoading(true);
     try {
-      await fetch("/api/workout/swaps", {
+      await fetch(apiUrl("/api/workout/swaps"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ originalExercise: exercise, replacementExercise: selected, scope, week, day }),
@@ -47,7 +48,7 @@ export default function SwapSheet({ exercise, week, day, isSwapped, onSwapped }:
     setLoading(true);
     try {
       const params = new URLSearchParams({ originalExercise: exercise, week: String(week), day: String(day) });
-      await fetch(`/api/workout/swaps?${params}`, { method: "DELETE" });
+      await fetch(apiUrl(`/api/workout/swaps?${params}`), { method: "DELETE" });
       onSwapped(null);
       setOpen(false);
     } finally {

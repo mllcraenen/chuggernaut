@@ -27,7 +27,7 @@ export default async function WorkoutPage() {
     <div className="min-h-screen bg-[#141b2d] text-[#f5f5f5]">
       <header className="sticky top-0 z-10 bg-[#141b2d]/95 backdrop-blur-sm border-b border-[#2a3352] px-5 py-4 flex items-center justify-between">
         <span className="text-sm font-semibold tracking-tight">Chuggernaut</span>
-        <span className="text-xs text-[#8e8e93]">Calgary Barbell 16-week</span>
+        <span className="text-xs text-[#8e8e93]">Monolith Meet Prep v7 — Lichtstad Cup</span>
       </header>
 
       <main className="max-w-md mx-auto w-full px-4 py-6 pb-24">

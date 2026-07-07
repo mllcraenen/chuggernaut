@@ -1,6 +1,9 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { getSetting, setSetting } from "@/lib/workout";
+import { markDirty } from "@/lib/sheets-sync";
+import { isSheetSyncedSettingKey } from "@/lib/sync-coverage";
+import { triggerExportIfDue } from "@/lib/workout-sheets";
 
 export async function GET(req: Request) {
   const session = await auth();
@@ -24,5 +27,9 @@ export async function POST(req: Request) {
   }
 
   setSetting(body.key, body.value);
+  if (isSheetSyncedSettingKey(body.key)) {
+    markDirty();
+    triggerExportIfDue();
+  }
   return NextResponse.json({ ok: true });
 }

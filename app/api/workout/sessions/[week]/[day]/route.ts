@@ -11,7 +11,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const WEEKS = 16;
+const WEEKS = 6;
 const DAYS = 4;
 
 function parse(weekStr: string, dayStr: string): { week: number; day: number } | null {

@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/base-path";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LiftId } from "@/lib/workout";
@@ -10,6 +11,7 @@ import type { Unit } from "@/lib/units";
 import { calculatePlates } from "@/lib/plate-calculator";
 import AutoregulateSheet from "@/components/workout/autoregulate-sheet";
 import type { AdjustmentSuggestion } from "@/lib/autoregulation";
+import { TM_FACTOR } from "@/lib/workout-program";
 
 // ----- Types (shared with the server page) -----
 
@@ -17,9 +19,10 @@ export type SessionSet = {
   setNumber: number;
   percentOfTM: number | null;
   prescribedWeight: number | null;
-  prescribedReps: number;
+  prescribedReps: number | null; // null on extra sets (no prescription)
   prescribedRpe: number | null;
   note: string | null;
+  isExtra?: boolean; // logged beyond the program's prescription
   logged: {
     actualWeight: number | null;
     actualReps: number | null;
@@ -43,12 +46,26 @@ type Logged = {
   e1rm: number | null;
 };
 
+export type PrevSet = {
+  weight: number | null;
+  reps: number | null;
+  rpe: number | null;
+  prescribedRpe: number | null;
+};
+
+// "@8 (prescribed @7)" — actual RPE next to what that set called for back then.
+function prevRpeSuffix(prev: PrevSet): string {
+  if (prev.rpe == null) return "";
+  const prescribed = prev.prescribedRpe != null ? ` (prescribed @${prev.prescribedRpe})` : "";
+  return ` @${prev.rpe}${prescribed}`;
+}
+
 type Props = {
   week: number;
   day: number;
   label: string;
   exercises: SessionExercise[];
-  previous: Record<string, { weight: number | null; reps: number | null }>;
+  previous: Record<string, PrevSet>;
   completedAt: string | null;
   notes: Record<string, string>;
 };
@@ -128,7 +145,7 @@ function SessionInner({
 
   useEffect(() => {
     try {
-      fetch(`/api/workout/settings?key=${BAR_WEIGHT_KEY}`)
+      fetch(apiUrl(`/api/workout/settings?key=${BAR_WEIGHT_KEY}`))
         .then((r) => r.ok ? r.json() : null)
         .then((data) => {
           const n = Number(data?.value);
@@ -183,7 +200,7 @@ function SessionInner({
   // Mark the session complete (or undo) on the server and refresh.
   const finalizeSession = useCallback(
     async (action: "complete" | "uncomplete") => {
-      const res = await fetch(`/api/workout/sessions/${week}/${day}`, {
+      const res = await fetch(apiUrl(`/api/workout/sessions/${week}/${day}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
@@ -194,7 +211,7 @@ function SessionInner({
       // After completing a session, push the latest data to the Google Sheet
       // in the background (best-effort — sync may not be configured).
       if (action === "complete") {
-        fetch("/api/workout/sheets/export", { method: "POST" }).catch(() => {});
+        fetch(apiUrl("/api/workout/sheets/export"), { method: "POST" }).catch(() => {});
       }
       router.refresh();
     },
@@ -210,7 +227,7 @@ function SessionInner({
       setError(null);
       try {
         if (acceptedLifts.length > 0) {
-          const tmRes = await fetch("/api/workout/training-maxes");
+          const tmRes = await fetch(apiUrl("/api/workout/training-maxes"));
           if (tmRes.ok) {
             const tmData = await tmRes.json();
             const current = (tmData?.trainingMaxes ?? {}) as Record<
@@ -224,13 +241,13 @@ function SessionInner({
                 const tm = suggMap.get(cur.lift)!;
                 return {
                   lift: cur.lift,
-                  e1rm: Math.round((tm / 0.9) * 10) / 10,
+                  e1rm: Math.round((tm / TM_FACTOR) * 10) / 10,
                   trainingMax: tm,
                 };
               }
               return { lift: cur.lift, e1rm: cur.e1rm, trainingMax: cur.trainingMax };
             });
-            await fetch("/api/workout/training-maxes", {
+            await fetch(apiUrl("/api/workout/training-maxes"), {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ maxes, autoLifts: acceptedLifts }),
@@ -265,7 +282,7 @@ function SessionInner({
     // Complete path — first ask the server for TM suggestions.
     setFinishing(true);
     try {
-      const res = await fetch("/api/workout/autoregulate", {
+      const res = await fetch(apiUrl("/api/workout/autoregulate"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ week, day }),
@@ -435,7 +452,7 @@ function ExerciseCard({
 }: {
   exercise: SessionExercise;
   logged: Record<string, Logged>;
-  previous: Record<string, { weight: number | null; reps: number | null }>;
+  previous: Record<string, PrevSet>;
   week: number;
   day: number;
   barKg: number;
@@ -444,11 +461,37 @@ function ExerciseCard({
   onLogged: (setNumber: number, value: Logged | null) => void;
   onError: (msg: string | null) => void;
 }) {
-  const allLogged = exercise.sets.every((s) => logged[keyOf(exercise.name, s.setNumber)]);
+  const isAccessory = exercise.lift === null;
+  const programSets = exercise.sets.filter((s) => !s.isExtra);
+  // Extra sets: persisted ones arrive via props; newly added ones live here.
+  const [extraSets, setExtraSets] = useState<SessionSet[]>(
+    exercise.sets.filter((s) => s.isExtra)
+  );
+  const allSets = [...programSets, ...extraSets];
+  const highestExtra = extraSets.length > 0 ? extraSets[extraSets.length - 1].setNumber : null;
+
+  function addExtraSet() {
+    const nextNumber = Math.max(...allSets.map((s) => s.setNumber)) + 1;
+    setExtraSets((prev) => [
+      ...prev,
+      {
+        setNumber: nextNumber,
+        percentOfTM: null,
+        prescribedWeight: null,
+        prescribedReps: null,
+        prescribedRpe: null,
+        note: null,
+        isExtra: true,
+        logged: null,
+      },
+    ]);
+  }
+
+  const allLogged = allSets.every((s) => logged[keyOf(exercise.name, s.setNumber)]);
   const lastSet = previous[keyOf(exercise.name, 1)];
 
-  const repRange = exercise.sets.length > 0
-    ? [...new Set(exercise.sets.map((s) => s.prescribedReps))]
+  const repRange = programSets.length > 0
+    ? [...new Set(programSets.map((s) => s.prescribedReps))]
         .join("–")
     : null;
 
@@ -459,7 +502,7 @@ function ExerciseCard({
   async function saveNote() {
     setNoteSaving(true);
     try {
-      const res = await fetch("/api/workout/notes", {
+      const res = await fetch(apiUrl("/api/workout/notes"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ week, day, exercise: exercise.name, note: noteText }),
@@ -482,7 +525,7 @@ function ExerciseCard({
         day: String(day),
         exercise: exercise.name,
       });
-      const res = await fetch(`/api/workout/notes?${params}`, { method: "DELETE" });
+      const res = await fetch(apiUrl(`/api/workout/notes?${params}`), { method: "DELETE" });
       if (!res.ok) throw new Error(`Delete failed (${res.status})`);
       setNoteText("");
       onNoteChange(null);
@@ -506,7 +549,7 @@ function ExerciseCard({
             <h3 className="text-xl font-bold text-[#f5f5f5] leading-tight">{exercise.name}</h3>
             {lastSet?.weight != null && (
               <p className="text-xs text-[#8e8e93] mt-1">
-                Last set · {lastSet.weight}kg × {lastSet.reps}
+                Last set · {lastSet.weight}kg × {lastSet.reps}{prevRpeSuffix(lastSet)}
               </p>
             )}
             <p className="text-xs text-[#8e8e93] mt-0.5">
@@ -528,7 +571,7 @@ function ExerciseCard({
 
         {/* Set rows — track last logged weight to autofill subsequent sets */}
         <div className="border-t border-[#2a3352] divide-y divide-[#2a3352]">
-          {exercise.sets.map((s) => {
+          {allSets.map((s) => {
             const prevLoggedWeight = (() => {
               for (let n = s.setNumber - 1; n >= 1; n--) {
                 const l = logged[keyOf(exercise.name, n)];
@@ -549,9 +592,25 @@ function ExerciseCard({
                 suggestedWeight={prevLoggedWeight}
                 onLogged={onLogged}
                 onError={onError}
+                // Only the highest extra set is removable — no renumbering,
+                // no _key churn in the sheet.
+                onRemove={
+                  s.isExtra && s.setNumber === highestExtra
+                    ? () => setExtraSets((prev) => prev.filter((x) => x.setNumber !== s.setNumber))
+                    : undefined
+                }
               />
             );
           })}
+          {isAccessory && (
+            <button
+              type="button"
+              onClick={addExtraSet}
+              className="w-full min-h-[44px] text-sm text-[#3d5080] hover:text-[#8e8e93] transition-colors"
+            >
+              + Add set
+            </button>
+          )}
         </div>
 
         {/* Notes footer */}
@@ -619,6 +678,7 @@ function SetRow({
   suggestedWeight,
   onLogged,
   onError,
+  onRemove,
 }: {
   exerciseName: string;
   set: SessionSet;
@@ -626,10 +686,11 @@ function SetRow({
   day: number;
   barKg: number;
   logged: Logged | null;
-  prev: { weight: number | null; reps: number | null } | null;
+  prev: PrevSet | null;
   suggestedWeight: number | null;
   onLogged: (setNumber: number, value: Logged | null) => void;
   onError: (msg: string | null) => void;
+  onRemove?: () => void; // set on removable extra sets only
 }) {
   const { unit } = useUnit();
   const [expanded, setExpanded] = useState(false);
@@ -652,7 +713,11 @@ function SetRow({
         : toInputWeight(set.prescribedWeight)
   );
   const [reps, setReps] = useState<string>(
-    logged?.actualReps != null ? String(logged.actualReps) : String(set.prescribedReps)
+    logged?.actualReps != null
+      ? String(logged.actualReps)
+      : set.prescribedReps != null
+        ? String(set.prescribedReps)
+        : ""
   );
   const [rpe, setRpe] = useState<number>(logged?.actualRpe ?? set.prescribedRpe ?? 8);
   const [saving, setSaving] = useState(false);
@@ -667,7 +732,7 @@ function SetRow({
     onError(null);
     setSaving(true);
     try {
-      const res = await fetch("/api/workout/sets", {
+      const res = await fetch(apiUrl("/api/workout/sets"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -733,11 +798,26 @@ function SetRow({
                 type="button"
                 aria-label="Show plate loading"
                 onClick={(e) => { e.stopPropagation(); setPlateOpen((v) => !v); }}
-                className={`text-base leading-none transition-colors ${
+                className={`leading-none transition-colors ${
                   plateOpen ? "text-[#e84545]" : "text-[#3d5080] hover:text-[#8e8e93]"
                 }`}
               >
-                🏋
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <line x1="1" y1="12" x2="4" y2="12" />
+                  <rect x="4" y="7" width="3" height="10" rx="1" fill="currentColor" stroke="none" />
+                  <rect x="17" y="7" width="3" height="10" rx="1" fill="currentColor" stroke="none" />
+                  <line x1="7" y1="12" x2="17" y2="12" />
+                  <line x1="20" y1="12" x2="23" y2="12" />
+                </svg>
               </button>
             )}
             {set.note && (
@@ -748,7 +828,7 @@ function SetRow({
           </div>
           {prev?.weight != null && !isLogged && (
             <p className="text-[10px] text-[#8e8e93]/70 mt-0.5">
-              prev {kgToDisplay(prev.weight, unit)} × {prev.reps}
+              prev {kgToDisplay(prev.weight, unit)} × {prev.reps}{prevRpeSuffix(prev)}
             </p>
           )}
         </div>
@@ -764,7 +844,11 @@ function SetRow({
         ) : (
           <div className="flex-shrink-0 rounded-full bg-[#242f4a] border border-[#2a3352] px-3 py-1">
             <span className="text-xs text-[#8e8e93] whitespace-nowrap">
-              {set.prescribedRpe != null ? `RPE ${set.prescribedRpe}` : `${set.prescribedReps} reps`}
+              {set.prescribedRpe != null
+                ? `RPE ${set.prescribedRpe}`
+                : set.prescribedReps != null
+                  ? `${set.prescribedReps} reps`
+                  : "extra"}
             </span>
           </div>
         )}
@@ -841,11 +925,16 @@ function SetRow({
             >
               {saving ? "Logging…" : isLogged ? "Update set" : "Log set"}
             </button>
-            {isLogged && (
+            {(isLogged || onRemove) && (
               <button
                 type="button"
                 disabled={removing || saving}
                 onClick={async () => {
+                  // Unlogged extra set: nothing in the DB, just drop the row.
+                  if (!isLogged) {
+                    onRemove?.();
+                    return;
+                  }
                   setRemoving(true);
                   onError(null);
                   try {
@@ -855,10 +944,11 @@ function SetRow({
                       exercise: exerciseName,
                       setNumber: String(set.setNumber),
                     });
-                    const res = await fetch(`/api/workout/sets?${params}`, { method: "DELETE" });
+                    const res = await fetch(apiUrl(`/api/workout/sets?${params}`), { method: "DELETE" });
                     if (!res.ok) throw new Error(`Remove failed (${res.status})`);
                     onLogged(set.setNumber, null as unknown as Logged);
                     setExpanded(false);
+                    onRemove?.();
                   } catch (e) {
                     onError(e instanceof Error ? e.message : "Could not remove set");
                   } finally {

@@ -1,5 +1,5 @@
 import { getDb } from "./workout-db";
-import { PROGRAM } from "./workout-program";
+import { PROGRAM, PROGRAM_WEEKS } from "./workout-program";
 import { markDirty } from "./sheets-sync";
 
 // ----- Key-value settings -----
@@ -21,6 +21,13 @@ export function getGoalDate(): string | null {
   return getSetting("goal_date");
 }
 
+// Goal date is sheet-exported (App Settings tab), so its mutations must flag
+// the sheet dirty — use this, not raw setSetting("goal_date", …).
+export function setGoalDate(date: string): void {
+  setSetting("goal_date", date);
+  markDirty();
+}
+
 export function getDaysOut(): { days: number; dateLabel: string } | null {
   const raw = getGoalDate();
   if (!raw) return null;
@@ -33,13 +40,12 @@ export function getDaysOut(): { days: number; dateLabel: string } | null {
 
 // ----- Lifts & program constants -----
 
-export type LiftId = "squat" | "bench" | "deadlift" | "ohp";
+export type LiftId = "squat" | "bench" | "deadlift";
 
 export const LIFTS: { id: LiftId; label: string }[] = [
   { id: "squat", label: "Squat" },
   { id: "bench", label: "Bench Press" },
-  { id: "deadlift", label: "Deadlift" },
-  { id: "ohp", label: "Overhead Press" },
+  { id: "deadlift", label: "Deadlift (Sumo)" },
 ];
 
 const LIFT_IDS = new Set<string>(LIFTS.map((l) => l.id));
@@ -48,11 +54,14 @@ export function isLiftId(value: unknown): value is LiftId {
   return typeof value === "string" && LIFT_IDS.has(value);
 }
 
-// Calgary Barbell standard: training max = 90% of estimated 1RM.
-export const TM_FACTOR = 0.9;
+// Canonical TM factor lives in workout-program.ts (client-safe); re-exported
+// here for server-side callers already importing from lib/workout.
+export { TM_FACTOR } from "./workout-program";
 
-// Epley estimated 1RM.
-export function epley1rm(weight: number, reps: number): number {
+// Epley estimated 1RM. Null for non-positive weight/reps — a 0 kg or
+// negative "lift" has no meaningful 1RM (bodyweight-aware e1RM lands in 3.4).
+export function epley1rm(weight: number, reps: number): number | null {
+  if (weight <= 0 || reps <= 0) return null;
   return Math.round(weight * (1 + reps / 30) * 10) / 10;
 }
 
@@ -257,6 +266,7 @@ export function startSession(week: number, day: number): SessionRow {
       "INSERT INTO workout_sessions (week, day, started_at) VALUES (?, ?, ?)"
     )
     .run(week, day, now);
+  markDirty(); // sessions are sheet-exported
   return getSession(week, day)!;
 }
 
@@ -371,6 +381,7 @@ export function deleteSet(
       "DELETE FROM workout_sets WHERE week = ? AND day = ? AND exercise = ? AND set_number = ?"
     )
     .run(week, day, exercise, setNumber);
+  if (result.changes > 0) markDirty();
   return result.changes > 0;
 }
 
@@ -392,7 +403,7 @@ export function getPlannedWeeklyVolume(): { week: number; planned: number; actua
     .all<{ week: number; volume: number }>();
   const actualByWeek = Object.fromEntries(actualRows.map((r) => [r.week, Math.round(r.volume)]));
 
-  return Array.from({ length: 16 }, (_, i) => {
+  return Array.from({ length: PROGRAM_WEEKS }, (_, i) => {
     const week = i + 1;
     const days = PROGRAM.filter((d) => d.week === week);
     let planned = 0;
@@ -433,26 +444,41 @@ export interface E1rmPoint {
   loggedAt: string;
 }
 
+// Exercise names belonging to a lift, derived from the program's `ex.lift`
+// field (never from name patterns). Active swaps fold in: a swapped-in
+// exercise inherits the original's lift. This helper is the single seam the
+// exercise registry (Phase 3) later replaces.
+export function getExercisesForLift(lift: LiftId): string[] {
+  const names = new Set<string>();
+  for (const day of PROGRAM) {
+    for (const ex of day.exercises) {
+      if (ex.lift === lift) names.add(ex.name);
+    }
+  }
+  const swaps = getDb()
+    .prepare("SELECT original_exercise, replacement_exercise FROM workout_swaps")
+    .all<{ original_exercise: string; replacement_exercise: string }>();
+  for (const s of swaps) {
+    if (names.has(s.original_exercise)) names.add(s.replacement_exercise);
+  }
+  return [...names];
+}
+
 export function getE1rmHistory(lift: LiftId): E1rmPoint[] {
+  const exercises = getExercisesForLift(lift);
+  if (exercises.length === 0) return [];
+  const placeholders = exercises.map(() => "?").join(",");
   const rows = getDb()
     .prepare(
-      `SELECT ws.week, ws.day, MAX(ws.e1rm) AS e1rm, MAX(ws.logged_at) AS logged_at
-       FROM workout_sets ws
-       JOIN workout_training_maxes tm ON tm.lift = ?
-       WHERE ws.exercise IN (
-         SELECT exercise FROM workout_sets
-         WHERE logged_at IS NOT NULL AND e1rm IS NOT NULL
-       ) AND ws.logged_at IS NOT NULL AND ws.e1rm IS NOT NULL
-         AND ws.exercise NOT IN (
-           'Romanian Deadlift','Leg Press','Leg Curl','Ab Work','Barbell Row',
-           'Triceps Pushdown','Face Pull','Bicep Curl','Pull-ups','Lateral Raise',
-           'Rear Delt Fly','Tricep Extension','Chest-Supported Row'
-         )
-       GROUP BY ws.week, ws.day
-       ORDER BY ws.week ASC, ws.day ASC
+      `SELECT week, day, MAX(e1rm) AS e1rm, MAX(logged_at) AS logged_at
+       FROM workout_sets
+       WHERE logged_at IS NOT NULL AND e1rm IS NOT NULL
+         AND exercise IN (${placeholders})
+       GROUP BY week, day
+       ORDER BY week ASC, day ASC
        LIMIT 200`
     )
-    .all<{ week: number; day: number; e1rm: number; logged_at: string }>(lift);
+    .all<{ week: number; day: number; e1rm: number; logged_at: string }>(...exercises);
 
   return rows.map((r) => ({
     week: r.week,
@@ -626,12 +652,14 @@ export function setNote(week: number, day: number, exercise: string, note: strin
        ON CONFLICT(week, day, exercise) DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at`
     )
     .run(week, day, exercise, note, now);
+  markDirty();
 }
 
 export function deleteNote(week: number, day: number, exercise: string): void {
   getDb()
     .prepare("DELETE FROM workout_notes WHERE week = ? AND day = ? AND exercise = ?")
     .run(week, day, exercise);
+  markDirty();
 }
 
 export function getNotesForSession(week: number, day: number): Record<string, string> {

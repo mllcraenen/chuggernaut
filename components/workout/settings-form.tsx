@@ -1,10 +1,10 @@
 "use client";
 
+import { apiUrl } from "@/lib/base-path";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { LiftId, TrainingMax, TmHistoryEntry } from "@/lib/workout";
-
-const TM_FACTOR = 0.9;
+import { TM_FACTOR } from "@/lib/workout-program";
 
 function suggestTm(e1rm: string): string {
   const n = Number(e1rm);
@@ -79,7 +79,9 @@ export default function SettingsForm({
           {
             e1rm: existing ? String(existing.e1rm) : "",
             tm: existing ? String(existing.trainingMax) : "",
-            tmTouched: !!existing,
+            // Only an explicit TM-field edit pins the TM; editing e1RM
+            // otherwise recomputes it (tmTouched set in setTm).
+            tmTouched: false,
           },
         ];
       })
@@ -124,7 +126,7 @@ export default function SettingsForm({
         e1rm: Number(entries[l.id].e1rm),
         trainingMax: Number(entries[l.id].tm),
       }));
-      const res = await fetch("/api/workout/training-maxes", {
+      const res = await fetch(apiUrl("/api/workout/training-maxes"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ maxes }),

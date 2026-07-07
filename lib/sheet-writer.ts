@@ -26,6 +26,9 @@ export class WorkoutSheetWriter {
     private blocks: BlockDefinition[],
     private tms: Record<string, TrainingMax>,
     loggedSets: SetRow[],
+    // Per-exercise notes keyed by noteKey(week, day, exercise); rendered on
+    // each exercise's first set row only (D4).
+    private notes: Record<string, string> = {},
   ) {
     this.logMap = new Map(
       loggedSets.map(s => [WorkoutSheetWriter.makeKey(s.week, s.day, s.setNumber, s.exercise), s])
@@ -38,8 +41,15 @@ export class WorkoutSheetWriter {
 
   static readonly HEADER: Row = [
     "_key", "Week", "Day", "Session", "Exercise", "Set",
-    "Prescribed", "Actual Weight (kg)", "Actual Reps", "RPE", "e1RM (kg)",
+    "Prescribed", "Actual Weight (kg)", "Actual Reps", "RPE", "e1RM (kg)", "Notes",
   ];
+
+  // Column index of the Notes cell (appended to the right — round-trip rule).
+  static readonly NOTES_COL = WorkoutSheetWriter.HEADER.indexOf("Notes");
+
+  static noteKey(week: number, day: number, exercise: string): string {
+    return `${week}|${day}|${exercise}`;
+  }
 
   // Key: week|day|setNumber|exercise — exercise is last so it may contain any chars
   static makeKey(week: number, day: number, setNumber: number, exercise: string): string {
@@ -68,8 +78,8 @@ export class WorkoutSheetWriter {
         const weight = Math.round(tm * set.percentOfTM / 100 * 2) / 2;
         return `${weight}kg × ${set.reps}${rpeStr}`;
       }
-      // TM not set yet — show percentage
-      return `${Math.round(set.percentOfTM * 100)}% × ${set.reps}${rpeStr}`;
+      // TM not set yet — show percentage (percentOfTM is already a whole number)
+      return `${Math.round(set.percentOfTM)}% × ${set.reps}${rpeStr}`;
     }
     // Accessory: no prescribed weight
     return `${set.reps} reps${rpeStr}`;
@@ -89,16 +99,22 @@ export class WorkoutSheetWriter {
     for (const session of sessions) {
       // Day separator when the day number changes
       if (session.day !== lastDay) {
-        rows.push(["", "", session.day, `=== Day ${session.day}: ${session.label} ===`, "", "", "", "", "", "", ""]);
+        rows.push(["", "", session.day, `=== Day ${session.day}: ${session.label} ===`, "", "", "", "", "", "", "", ""]);
         lastDay = session.day;
       }
 
       // Week sub-header
-      rows.push(["", session.week, session.day, session.label, "", `— Week ${session.week} —`, "", "", "", "", ""]);
+      rows.push(["", session.week, session.day, session.label, "", `— Week ${session.week} —`, "", "", "", "", "", ""]);
+
+      const emittedKeys = new Set<string>();
+      const noteEmitted = new Set<string>();
 
       for (const exercise of session.exercises) {
+        const note = this.notes[WorkoutSheetWriter.noteKey(session.week, session.day, exercise.name)] ?? "";
+        let firstSet = true;
         for (const set of exercise.sets) {
           const key = WorkoutSheetWriter.makeKey(session.week, session.day, set.setNumber, exercise.name);
+          emittedKeys.add(key);
           const logged = this.logMap.get(key);
           rows.push([
             key,
@@ -112,8 +128,45 @@ export class WorkoutSheetWriter {
             logged?.actualReps ?? "",
             logged?.actualRpe ?? "",
             logged?.e1rm ?? "",
+            firstSet ? note : "",
           ]);
+          firstSet = false;
         }
+        if (exercise.sets.length > 0) {
+          noteEmitted.add(WorkoutSheetWriter.noteKey(session.week, session.day, exercise.name));
+        }
+      }
+
+      // Logged sets beyond the prescription (extra accessory sets, or sets
+      // logged under a swapped-in exercise name): real keys, empty
+      // prescription cells. Without this they'd silently vanish from the sheet.
+      const extras = [...this.logMap.values()]
+        .filter(s =>
+          s.week === session.week &&
+          s.day === session.day &&
+          !emittedKeys.has(WorkoutSheetWriter.makeKey(s.week, s.day, s.setNumber, s.exercise))
+        )
+        .sort((a, b) =>
+          a.exercise !== b.exercise ? a.exercise.localeCompare(b.exercise) : a.setNumber - b.setNumber
+        );
+      for (const s of extras) {
+        const nKey = WorkoutSheetWriter.noteKey(s.week, s.day, s.exercise);
+        const note = noteEmitted.has(nKey) ? "" : (this.notes[nKey] ?? "");
+        noteEmitted.add(nKey);
+        rows.push([
+          WorkoutSheetWriter.makeKey(s.week, s.day, s.setNumber, s.exercise),
+          s.week,
+          s.day,
+          session.label,
+          s.exercise,
+          `Set ${s.setNumber} (extra)`,
+          "",
+          s.actualWeight ?? "",
+          s.actualReps ?? "",
+          s.actualRpe ?? "",
+          s.e1rm ?? "",
+          note,
+        ]);
       }
     }
 
@@ -160,6 +213,34 @@ export class WorkoutSheetWriter {
         actualReps,
         actualRpe,
       });
+    }
+
+    return results;
+  }
+
+  // Extract the note per (week, day, exercise) from each exercise's first set
+  // row. Sheet is authoritative: an empty/missing cell means "no note", so
+  // callers clear the stored note for combos returned with note === "".
+  // Only call this when the tab's header row actually has a Notes column —
+  // older sheets without it must leave DB notes untouched.
+  static parseBlockNotes(rows: unknown[][]): Array<{
+    week: number;
+    day: number;
+    exercise: string;
+    note: string;
+  }> {
+    const results: ReturnType<typeof WorkoutSheetWriter.parseBlockNotes> = [];
+    const seen = new Set<string>();
+
+    for (const row of rows) {
+      const parsed = WorkoutSheetWriter.parseKey(row[0]);
+      if (!parsed) continue;
+      const key = WorkoutSheetWriter.noteKey(parsed.week, parsed.day, parsed.exercise);
+      if (seen.has(key)) continue; // only the exercise's first set row carries the note
+      seen.add(key);
+      const raw = row[WorkoutSheetWriter.NOTES_COL];
+      const note = raw === null || raw === undefined ? "" : String(raw).trim();
+      results.push({ week: parsed.week, day: parsed.day, exercise: parsed.exercise, note });
     }
 
     return results;

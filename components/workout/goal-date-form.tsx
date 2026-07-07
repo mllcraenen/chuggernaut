@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/base-path";
 import { useState } from "react";
 
 export default function GoalDateForm({ current }: { current: string | null }) {
@@ -12,9 +13,9 @@ export default function GoalDateForm({ current }: { current: string | null }) {
     setSaved(false);
     try {
       if (!date) {
-        await fetch("/api/workout/goal-date", { method: "DELETE" });
+        await fetch(apiUrl("/api/workout/goal-date"), { method: "DELETE" });
       } else {
-        await fetch("/api/workout/goal-date", {
+        await fetch(apiUrl("/api/workout/goal-date"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ goalDate: date }),
