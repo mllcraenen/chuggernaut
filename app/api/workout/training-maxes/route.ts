@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { triggerExportIfDue } from "@/lib/workout-sheets";
 import {
   LIFTS,
-  TM_FACTOR,
+  getTmFactor,
   getTrainingMaxes,
   isOnboarded,
   setTrainingMaxes,
@@ -22,7 +22,7 @@ export async function GET() {
   return NextResponse.json({
     onboarded: isOnboarded(),
     trainingMaxes: getTrainingMaxes(),
-    tmFactor: TM_FACTOR,
+    tmFactor: getTmFactor(),
   });
 }
 
@@ -32,7 +32,7 @@ function num(v: unknown): number | null {
 }
 
 // Body: { maxes: [{ lift, e1rm, trainingMax? }] }
-// If trainingMax is omitted it is derived as e1rm * TM_FACTOR.
+// If trainingMax is omitted it is derived as e1rm * getTmFactor().
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
     const tmRaw = num(item.trainingMax);
     const trainingMax = tmRaw !== null && tmRaw > 0
       ? tmRaw
-      : Math.round(e1rm * TM_FACTOR * 10) / 10;
+      : Math.round(e1rm * getTmFactor() * 10) / 10;
     entries.push({ lift: item.lift, e1rm, trainingMax });
   }
 

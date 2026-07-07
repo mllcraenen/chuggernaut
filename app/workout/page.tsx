@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { LIFTS, getTrainingMaxes, isOnboarded, listSessions, getDaysOut, getPlannedWeeklyVolume } from "@/lib/workout";
+import { LIFTS, getTmFactor, getTrainingMaxes, isOnboarded, listSessions, getDaysOut, getPlannedWeeklyVolume } from "@/lib/workout";
 import OnboardingForm from "@/components/workout/onboarding-form";
 import ProgramOverview from "@/components/workout/program-overview";
 import WorkoutTabBar from "@/components/workout/workout-tab-bar";
@@ -32,7 +32,7 @@ export default async function WorkoutPage() {
 
       <main className="max-w-md mx-auto w-full px-4 py-6 pb-24">
         {!onboarded ? (
-          <OnboardingForm />
+          <OnboardingForm tmFactor={getTmFactor()} />
         ) : (
           <div className="space-y-5">
             {/* Training maxes — compact tappable row */}

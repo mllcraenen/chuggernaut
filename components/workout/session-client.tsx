@@ -128,6 +128,10 @@ function SessionInner({
   // ----- Rest timer -----
   const [restSetting, setRestSetting] = useState<number | "off">("off");
   const [restCustom, setRestCustom] = useState<number>(150);
+  // Absolute deadline (ms epoch), not a decrementing counter: background tabs
+  // throttle setInterval, so the display must always be derived from
+  // `restEndsAt - Date.now()` to stay correct after the tab sleeps.
+  const [restEndsAt, setRestEndsAt] = useState<number | null>(null);
   const [restRemaining, setRestRemaining] = useState<number | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -167,21 +171,39 @@ function SessionInner({
 
   const startRest = useCallback(() => {
     if (restSetting === "off") return;
+    setRestEndsAt(Date.now() + restSetting * 1000);
     setRestRemaining(restSetting);
   }, [restSetting]);
 
-  const dismissRest = useCallback(() => setRestRemaining(null), []);
+  const dismissRest = useCallback(() => {
+    setRestEndsAt(null);
+    setRestRemaining(null);
+  }, []);
 
   useEffect(() => {
-    if (restRemaining == null) {
+    if (restEndsAt == null) {
       if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
       return;
     }
-    tickRef.current = setInterval(() => {
-      setRestRemaining((r) => (r == null ? null : r <= 1 ? null : r - 1));
-    }, 1000);
-    return () => { if (tickRef.current) clearInterval(tickRef.current); };
-  }, [restRemaining]);
+    const sync = () => {
+      const left = Math.ceil((restEndsAt - Date.now()) / 1000);
+      if (left <= 0) {
+        setRestEndsAt(null);
+        setRestRemaining(null);
+      } else {
+        setRestRemaining(left);
+      }
+    };
+    sync();
+    tickRef.current = setInterval(sync, 1000);
+    // Resync immediately when the tab wakes up instead of waiting for the
+    // next (possibly throttled) interval tick.
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      if (tickRef.current) clearInterval(tickRef.current);
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, [restEndsAt]);
 
   // ----- Logging -----
   const onLogged = useCallback(
@@ -234,6 +256,7 @@ function SessionInner({
               string,
               { lift: LiftId; e1rm: number; trainingMax: number }
             >;
+            const factor = Number(tmData?.tmFactor) || TM_FACTOR;
             const suggMap = new Map(suggestions.map((s) => [s.lift, s.suggestedTm]));
             const acceptedSet = new Set(acceptedLifts);
             const maxes = Object.values(current).map((cur) => {
@@ -241,7 +264,7 @@ function SessionInner({
                 const tm = suggMap.get(cur.lift)!;
                 return {
                   lift: cur.lift,
-                  e1rm: Math.round((tm / TM_FACTOR) * 10) / 10,
+                  e1rm: Math.round((tm / factor) * 10) / 10,
                   trainingMax: tm,
                 };
               }
@@ -548,7 +571,7 @@ function ExerciseCard({
           <div className="flex-1 min-w-0 pr-3">
             <h3 className="text-xl font-bold text-[#f5f5f5] leading-tight">{exercise.name}</h3>
             {lastSet?.weight != null && (
-              <p className="text-xs text-[#8e8e93] mt-1">
+              <p className="text-xs italic text-[#8e8e93] mt-1">
                 Last set · {lastSet.weight}kg × {lastSet.reps}{prevRpeSuffix(lastSet)}
               </p>
             )}
@@ -558,7 +581,6 @@ function ExerciseCard({
             </p>
           </div>
           <div className="flex items-center gap-3 pt-0.5">
-            <span className="text-[#3d5080] select-none text-base" aria-hidden>ⓘ</span>
             <SwapSheet
               exercise={exercise.originalName}
               week={week}
@@ -827,7 +849,7 @@ function SetRow({
             )}
           </div>
           {prev?.weight != null && !isLogged && (
-            <p className="text-[10px] text-[#8e8e93]/70 mt-0.5">
+            <p className="text-[10px] italic text-[#8e8e93]/70 mt-0.5">
               prev {kgToDisplay(prev.weight, unit)} × {prev.reps}{prevRpeSuffix(prev)}
             </p>
           )}
@@ -843,7 +865,7 @@ function SetRow({
           </div>
         ) : (
           <div className="flex-shrink-0 rounded-full bg-[#242f4a] border border-[#2a3352] px-3 py-1">
-            <span className="text-xs text-[#8e8e93] whitespace-nowrap">
+            <span className={`text-xs text-[#8e8e93] whitespace-nowrap ${set.prescribedRpe != null ? "font-bold" : ""}`}>
               {set.prescribedRpe != null
                 ? `RPE ${set.prescribedRpe}`
                 : set.prescribedReps != null

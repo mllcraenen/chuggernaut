@@ -1,10 +1,12 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import SettingsForm from "@/components/workout/settings-form";
 import WorkoutTabBar from "@/components/workout/workout-tab-bar";
 import UnitToggle from "@/components/workout/unit-toggle";
-import { getTrainingMaxes, getGoalDate, getSetting, getTmHistory, LIFTS, type TmHistoryEntry } from "@/lib/workout";
+import { getTrainingMaxes, getGoalDate, getSetting, getTmFactor, getTmHistory, LIFTS, type TmHistoryEntry } from "@/lib/workout";
 import BarWeightSelector from "@/components/workout/bar-weight-selector";
+import TmFactorInput from "@/components/workout/tm-factor-input";
 import GoalDateForm from "@/components/workout/goal-date-form";
 import SheetsSyncForm from "@/components/workout/sheets-sync-form";
 import { getStatus, SETTING_SPREADSHEET_ID, importIfStale } from "@/lib/workout-sheets";
@@ -26,17 +28,18 @@ export default async function WorkoutSettingsPage() {
   const sheetsStatus = getStatus();
   const spreadsheetId = getSetting(SETTING_SPREADSHEET_ID) ?? "";
   const barWeight = Number(getSetting("bar_weight") ?? "20") || 20;
+  const tmFactor = getTmFactor();
 
   return (
     <div className="min-h-screen bg-[#141b2d] text-[#f5f5f5]">
       <header className="sticky top-0 z-10 bg-[#141b2d] border-b border-[#2a3352] px-5 py-4 flex items-center justify-between">
         <span className="text-sm font-medium tracking-tight">Settings</span>
-        <a
+        <Link
           href="/workout"
           className="text-xs text-[#8e8e93] hover:text-[#f5f5f5] transition-colors"
         >
           ← Chuggernaut
-        </a>
+        </Link>
       </header>
 
       <main className="max-w-md mx-auto w-full px-4 py-6 pb-24">
@@ -44,11 +47,11 @@ export default async function WorkoutSettingsPage() {
           <div>
             <h1 className="text-xl font-semibold">Training Maxes</h1>
             <p className="mt-1 text-sm text-[#8e8e93]">
-              Update your e1RM estimates. Training max is set to 90% automatically.
+              Update your e1RM estimates. Training max is set to {Math.round(tmFactor * 1000) / 10}% automatically.
             </p>
           </div>
 
-          <SettingsForm lifts={LIFTS} currentTms={tms} history={tmHistory} />
+          <SettingsForm lifts={LIFTS} currentTms={tms} history={tmHistory} tmFactor={tmFactor} />
 
           <div>
             <h2 className="text-base font-semibold mb-3">Preferences</h2>
@@ -56,6 +59,7 @@ export default async function WorkoutSettingsPage() {
               <UnitToggle />
               <GoalDateForm current={goalDate} />
               <BarWeightSelector initial={barWeight} />
+              <TmFactorInput initial={tmFactor} />
             </div>
           </div>
 

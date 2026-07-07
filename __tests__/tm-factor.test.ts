@@ -1,5 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readdirSync, readFileSync, statSync } from "fs";
+import { mkdtemp, rm } from "fs/promises";
+import { tmpdir } from "os";
 import { join } from "path";
 import { TM_FACTOR } from "@/lib/workout-program";
 
@@ -34,5 +36,36 @@ describe("TM_FACTOR is defined exactly once", () => {
 
   it("canonical value is 0.88", () => {
     expect(TM_FACTOR).toBe(0.88);
+  });
+});
+
+describe("getTmFactor (configurable via tm_factor setting)", () => {
+  let testRoot: string;
+
+  beforeAll(async () => {
+    testRoot = await mkdtemp(join(tmpdir(), "tm-factor-"));
+    process.env.WORKOUT_DB_PATH = join(testRoot, "workout.db");
+  });
+
+  afterAll(async () => {
+    await rm(testRoot, { recursive: true, force: true });
+    delete process.env.WORKOUT_DB_PATH;
+  });
+
+  it("defaults to TM_FACTOR when unset, honours a valid setting, rejects garbage", async () => {
+    const { getTmFactor, setSetting } = await import("@/lib/workout");
+    const { getDb } = await import("@/lib/workout-db");
+    getDb().exec("DELETE FROM workout_settings WHERE key = 'tm_factor'");
+
+    expect(getTmFactor()).toBe(TM_FACTOR);
+
+    setSetting("tm_factor", "0.9");
+    expect(getTmFactor()).toBe(0.9);
+
+    // Out of range or non-numeric falls back to the default.
+    for (const bad of ["1.5", "0.2", "-1", "abc", ""]) {
+      setSetting("tm_factor", bad);
+      expect(getTmFactor(), `value ${JSON.stringify(bad)}`).toBe(TM_FACTOR);
+    }
   });
 });
