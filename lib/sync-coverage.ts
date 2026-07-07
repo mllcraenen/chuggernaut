@@ -21,6 +21,7 @@ export type SyncCoverage =
 // Tab names for the export-only tabs (workout-sheets.ts imports these).
 export const TAB_SESSIONS = "Sessions";
 export const TAB_SETTINGS = "App Settings";
+export const TAB_EXERCISES = "Exercises";
 
 // Placeholder tab name for data spread across the per-block tabs.
 export const BLOCK_TABS = "<block tabs>";
@@ -39,6 +40,16 @@ export const TABLE_COVERAGE: Record<string, SyncCoverage> = {
   workout_settings: {
     mode: "exempt",
     reason: "key/value store — covered per key by SETTINGS_KEY_COVERAGE",
+  },
+  workout_exercises: {
+    mode: "export-only",
+    tab: TAB_EXERCISES,
+    reason: "user-edited registry; edited in-app via the exercise editor, sheet copy for the record",
+  },
+  workout_exercise_alternatives: {
+    mode: "export-only",
+    tab: TAB_EXERCISES,
+    reason: "rendered as the alternatives column of the Exercises tab",
   },
 };
 

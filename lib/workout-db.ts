@@ -76,6 +76,23 @@ CREATE TABLE IF NOT EXISTS workout_notes (
   UNIQUE(week, day, exercise)
 );
 
+CREATE TABLE IF NOT EXISTS workout_exercises (
+  id INTEGER PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  lift TEXT,
+  role TEXT NOT NULL DEFAULT 'accessory' CHECK(role IN ('main','accessory')),
+  load_mode TEXT NOT NULL DEFAULT 'external' CHECK(load_mode IN ('external','bodyweight','assisted')),
+  rep_mode TEXT NOT NULL DEFAULT 'reps' CHECK(rep_mode IN ('reps','time')),
+  e1rm_mode TEXT NOT NULL DEFAULT 'epley' CHECK(e1rm_mode IN ('epley','bodyweight_epley','none')),
+  archived INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS workout_exercise_alternatives (
+  exercise_id INTEGER NOT NULL REFERENCES workout_exercises(id) ON DELETE CASCADE,
+  alternative_id INTEGER NOT NULL REFERENCES workout_exercises(id) ON DELETE CASCADE,
+  PRIMARY KEY (exercise_id, alternative_id)
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_week_day
   ON workout_sessions(week, day);
 CREATE INDEX IF NOT EXISTS idx_sets_week_day

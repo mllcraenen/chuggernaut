@@ -35,6 +35,11 @@ export type SessionExercise = {
   name: string;
   originalName: string;
   lift: LiftId | null;
+  // Registry attributes (lib/exercise-registry.ts) — never derived from names.
+  role: "main" | "accessory";
+  loadMode: "external" | "bodyweight" | "assisted";
+  repMode: "reps" | "time";
+  e1rmMode: "epley" | "bodyweight_epley" | "none";
   isSwapped: boolean;
   sets: SessionSet[];
 };
@@ -68,6 +73,9 @@ type Props = {
   previous: Record<string, PrevSet>;
   completedAt: string | null;
   notes: Record<string, string>;
+  // Latest logged body weight at the session date — used to preview e1RM for
+  // bodyweight/assisted exercises. Null when never logged.
+  bodyWeightKg: number | null;
 };
 
 function epley(weight: number, reps: number): number {
@@ -97,6 +105,7 @@ function SessionInner({
   previous,
   completedAt: initialCompletedAt,
   notes: initialNotes,
+  bodyWeightKg,
 }: Props) {
   const router = useRouter();
 
@@ -354,6 +363,7 @@ function SessionInner({
           week={week}
           day={day}
           barKg={barKg}
+          bodyWeightKg={bodyWeightKg}
           note={notes[ex.name] ?? null}
           onNoteChange={(n) => setNotes((prev) => {
             const next = { ...prev };
@@ -468,6 +478,7 @@ function ExerciseCard({
   week,
   day,
   barKg,
+  bodyWeightKg,
   note,
   onNoteChange,
   onLogged,
@@ -479,12 +490,15 @@ function ExerciseCard({
   week: number;
   day: number;
   barKg: number;
+  bodyWeightKg: number | null;
   note: string | null;
   onNoteChange: (note: string | null) => void;
   onLogged: (setNumber: number, value: Logged | null) => void;
   onError: (msg: string | null) => void;
 }) {
-  const isAccessory = exercise.lift === null;
+  // Registry role, not `lift === null` — the add-set gate must survive
+  // program/registry edits (roadmap 3.2).
+  const isAccessory = exercise.role === "accessory";
   const programSets = exercise.sets.filter((s) => !s.isExtra);
   // Extra sets: persisted ones arrive via props; newly added ones live here.
   const [extraSets, setExtraSets] = useState<SessionSet[]>(
@@ -576,8 +590,8 @@ function ExerciseCard({
               </p>
             )}
             <p className="text-xs text-[#8e8e93] mt-0.5">
-              {exercise.sets.length} sets{repRange ? ` × ${repRange} reps` : ""}
-              {exercise.lift === null && <span className="ml-1 text-[#8e8e93]">· accessory</span>}
+              {exercise.sets.length} sets{repRange ? ` × ${repRange} ${exercise.repMode === "time" ? "s" : "reps"}` : ""}
+              {isAccessory && <span className="ml-1 text-[#8e8e93]">· accessory</span>}
             </p>
           </div>
           <div className="flex items-center gap-3 pt-0.5">
@@ -609,6 +623,10 @@ function ExerciseCard({
                 week={week}
                 day={day}
                 barKg={barKg}
+                loadMode={exercise.loadMode}
+                repMode={exercise.repMode}
+                e1rmMode={exercise.e1rmMode}
+                bodyWeightKg={bodyWeightKg}
                 logged={logged[keyOf(exercise.name, s.setNumber)] ?? null}
                 prev={previous[keyOf(exercise.name, s.setNumber)] ?? null}
                 suggestedWeight={prevLoggedWeight}
@@ -695,6 +713,10 @@ function SetRow({
   week,
   day,
   barKg,
+  loadMode,
+  repMode,
+  e1rmMode,
+  bodyWeightKg,
   logged,
   prev,
   suggestedWeight,
@@ -707,6 +729,10 @@ function SetRow({
   week: number;
   day: number;
   barKg: number;
+  loadMode: SessionExercise["loadMode"];
+  repMode: SessionExercise["repMode"];
+  e1rmMode: SessionExercise["e1rmMode"];
+  bodyWeightKg: number | null;
   logged: Logged | null;
   prev: PrevSet | null;
   suggestedWeight: number | null;
@@ -744,11 +770,19 @@ function SetRow({
   const [rpe, setRpe] = useState<number>(logged?.actualRpe ?? set.prescribedRpe ?? 8);
   const [saving, setSaving] = useState(false);
 
+  // Assisted exercises log negative external weight (assistance); everything
+  // else stays ≥ 0 (server enforces the same rule, load-mode-aware).
+  const allowNegative = loadMode === "assisted";
+
   async function save() {
     const wDisplay = Number(weight);
     const r = Number(reps);
-    if (!Number.isFinite(wDisplay) || wDisplay < 0) return onError("Enter a valid weight");
-    if (!Number.isInteger(r) || r < 1) return onError("Enter valid reps");
+    if (!Number.isFinite(wDisplay) || (!allowNegative && wDisplay < 0)) {
+      return onError("Enter a valid weight");
+    }
+    if (!Number.isInteger(r) || r < 1) {
+      return onError(repMode === "time" ? "Enter valid seconds" : "Enter valid reps");
+    }
     // Always store in kg
     const w = unit === "lbs" ? Math.round(wDisplay * displayToKg(1, "lbs") * 10) / 10 : wDisplay;
     onError(null);
@@ -773,7 +807,9 @@ function SetRow({
         actualWeight: saved.actualWeight ?? w,
         actualReps: saved.actualReps ?? r,
         actualRpe: saved.actualRpe ?? rpe,
-        e1rm: saved.e1rm ?? epley(w, r),
+        // Server is authoritative: null is a valid e1RM (e1rm_mode none,
+        // bodyweight without a logged BW, timed sets).
+        e1rm: saved.e1rm ?? null,
       });
       setExpanded(false);
     } catch (e) {
@@ -784,11 +820,35 @@ function SetRow({
   }
 
   const isLogged = !!logged;
-  const liveE1rm =
-    logged?.e1rm ??
-    (Number.isFinite(Number(weight)) && Number(reps) >= 1
-      ? epley(Number(weight), Number(reps))
-      : null);
+  // Live e1RM preview mirrors the server's computeSetE1rm: bodyweight modes
+  // add the latest body weight to the (kg-converted) external weight.
+  const liveE1rm = (() => {
+    if (logged?.e1rm != null) return logged.e1rm;
+    if (e1rmMode === "none" || repMode === "time") return null;
+    const wDisplay = Number(weight);
+    const r = Number(reps);
+    if (!Number.isFinite(wDisplay) || r < 1) return null;
+    const wKg = unit === "lbs" ? wDisplay * displayToKg(1, "lbs") : wDisplay;
+    if (e1rmMode === "bodyweight_epley") {
+      if (bodyWeightKg == null || bodyWeightKg + wKg <= 0) return null;
+      return epley(Math.round((bodyWeightKg + wKg) * 10) / 10, r);
+    }
+    return wKg > 0 ? epley(wKg, r) : null;
+  })();
+
+  // "BW − 20 kg" style annotation for bodyweight/assisted exercises.
+  const effectiveLoadLabel = (() => {
+    if (loadMode === "external") return null;
+    const wKg = Number.isFinite(Number(weight))
+      ? (unit === "lbs" ? Number(weight) * displayToKg(1, "lbs") : Number(weight))
+      : 0;
+    const rounded = Math.round(Math.abs(wKg) * 10) / 10;
+    const sign = wKg < 0 ? "−" : "+";
+    const base = rounded === 0 ? "BW" : `BW ${sign} ${rounded} kg`;
+    return bodyWeightKg != null
+      ? `${base} = ${Math.round((bodyWeightKg + wKg) * 10) / 10} kg`
+      : `${base} (log body weight for e1RM)`;
+  })();
 
   return (
     <div className="px-4 py-3">
@@ -890,11 +950,17 @@ function SetRow({
         <div className="mt-3 space-y-3 pl-11">
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
-              <span className="text-xs text-[#8e8e93]">Weight ({unitLabel(unit)})</span>
+              <span className="text-xs text-[#8e8e93]">
+                {loadMode === "assisted"
+                  ? `Assist / extra (${unitLabel(unit)})`
+                  : loadMode === "bodyweight"
+                    ? `Added weight (${unitLabel(unit)})`
+                    : `Weight (${unitLabel(unit)})`}
+              </span>
               <input
                 type="number"
                 inputMode="decimal"
-                min={0}
+                min={allowNegative ? undefined : 0}
                 step={2.5}
                 value={weight}
                 onChange={(e) => setWeight(e.target.value)}
@@ -902,7 +968,7 @@ function SetRow({
               />
             </label>
             <label className="block">
-              <span className="text-xs text-[#8e8e93]">Reps</span>
+              <span className="text-xs text-[#8e8e93]">{repMode === "time" ? "Seconds" : "Reps"}</span>
               <input
                 type="number"
                 inputMode="numeric"
@@ -932,6 +998,9 @@ function SetRow({
             />
           </div>
 
+          {effectiveLoadLabel && (
+            <p className="text-xs text-[#8e8e93]">{effectiveLoadLabel}</p>
+          )}
           {liveE1rm != null && (
             <p className="text-xs text-[#8e8e93]">
               e1RM <span className="text-[#f5f5f5] font-mono font-semibold">{liveE1rm} kg</span>

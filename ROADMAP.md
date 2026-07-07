@@ -58,7 +58,9 @@ Phased plan for the feature/bug backlog. Ordering: bugs → small UX → exercis
   - *Audit:* close today's known gaps — `workout_sessions` and `goal_date` have no sheet representation at all; `deleteSet` doesn't `markDirty()` (overlaps 2.3); notes land via 2.2.
   - *Scaffold (the durable part):* a declarative **sync-coverage registry** — one module mapping every SCHEMA table and app-level `workout_settings` key to its tab + export/import path, or an explicit `exempt: <reason>` entry. Invariant tests derive from it: (i) every table parsed out of `SCHEMA` and every known settings key appears in the registry — a new table without a sync decision fails CI; (ii) every registered-as-synced entity has a lossless export→import→export test; (iii) every mutator in `lib/workout.ts` that writes a synced table calls `markDirty()` (assert via mocked `lib/sheets-sync`). Adding state then *forces* a conscious choice: map it or exempt it with a reason — nothing can be missed by accident.
 
-## Phase 3 — Exercise registry (L; the foundation)
+## Phase 3 — Exercise registry (L; the foundation) — **Done (feature/chug-008, 2026-07-07)**
+
+Shipped: `workout_exercises` + `workout_exercise_alternatives` (idempotent insert-only seed from the program + lift-keyed extras, user edits survive restarts), registry-backed `getExercisesForLift`/swap alternatives (static `lib/exercise-alternatives.ts` deleted), accessory add-set gate on `role`, editor GUI at `/workout/exercises` (rename blocked once the name is referenced by sets/swaps/notes — archive-and-recreate instead), bodyweight/assisted e1RM via `computeSetE1rm` + load-mode-aware `validateSetWeight` (server and sheet-import paths), timed exercises (`rep_mode = 'time'`, seconds in the reps column, no e1RM, "45s" prescription prose in the sheet), and an export-only Exercises sheet tab registered in sync-coverage.
 
 Exercises become DB-backed entities. Swaps, e1RM behavior, accessory gating, warmup mapping, and the program wizard all hang off this — it is the durable fix for every string-matching failure above.
 

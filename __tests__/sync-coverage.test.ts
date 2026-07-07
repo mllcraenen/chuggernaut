@@ -167,6 +167,43 @@ describe("mutators mark the sheet dirty", () => {
       const w = await import("@/lib/workout");
       w.setGoalDate("2026-11-28");
     }],
+    ["createExercise", async () => {
+      const reg = await import("@/lib/exercise-registry");
+      reg.createExercise({
+        name: `Coverage Exercise ${Date.now()}`, lift: null, role: "accessory",
+        loadMode: "external", repMode: "reps", e1rmMode: "epley",
+      });
+    }],
+    ["updateExercise", async () => {
+      const reg = await import("@/lib/exercise-registry");
+      const ex = reg.createExercise({
+        name: `Coverage Update ${Date.now()}`, lift: null, role: "accessory",
+        loadMode: "external", repMode: "reps", e1rmMode: "epley",
+      });
+      const { clearDirty } = await import("@/lib/sheets-sync");
+      clearDirty();
+      reg.updateExercise(ex.id, { ...ex, e1rmMode: "none" });
+    }],
+    ["setExerciseArchived", async () => {
+      const reg = await import("@/lib/exercise-registry");
+      const ex = reg.createExercise({
+        name: `Coverage Archive ${Date.now()}`, lift: null, role: "accessory",
+        loadMode: "external", repMode: "reps", e1rmMode: "epley",
+      });
+      const { clearDirty } = await import("@/lib/sheets-sync");
+      clearDirty();
+      reg.setExerciseArchived(ex.id, true);
+    }],
+    ["setAlternatives", async () => {
+      const reg = await import("@/lib/exercise-registry");
+      const ex = reg.createExercise({
+        name: `Coverage Alts ${Date.now()}`, lift: null, role: "accessory",
+        loadMode: "external", repMode: "reps", e1rmMode: "epley",
+      });
+      const { clearDirty } = await import("@/lib/sheets-sync");
+      clearDirty();
+      reg.setAlternatives(ex.id, []);
+    }],
   ];
 
   for (const [name, mutate] of MUTATIONS) {

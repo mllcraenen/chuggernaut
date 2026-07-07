@@ -29,6 +29,10 @@ export class WorkoutSheetWriter {
     // Per-exercise notes keyed by noteKey(week, day, exercise); rendered on
     // each exercise's first set row only (D4).
     private notes: Record<string, string> = {},
+    // Exercises whose registry rep_mode is 'time' — their prescription cell
+    // renders seconds prose ("45s") instead of a rep count. Logged cells stay
+    // numeric (seconds) so the round-trip is unaffected.
+    private timeExercises: Set<string> = new Set(),
   ) {
     this.logMap = new Map(
       loggedSets.map(s => [WorkoutSheetWriter.makeKey(s.week, s.day, s.setNumber, s.exercise), s])
@@ -70,8 +74,14 @@ export class WorkoutSheetWriter {
     return { week, day, setNumber, exercise };
   }
 
-  static prescribedLabel(set: ProgramSet, exercise: ProgramExercise, tms: Record<string, TrainingMax>): string {
+  static prescribedLabel(
+    set: ProgramSet,
+    exercise: ProgramExercise,
+    tms: Record<string, TrainingMax>,
+    isTimeBased = false,
+  ): string {
     const rpeStr = set.rpe != null ? ` @RPE${set.rpe}` : "";
+    if (isTimeBased) return `${set.reps}s${rpeStr}`;
     if (set.percentOfTM != null && exercise.lift) {
       const tm = tms[exercise.lift]?.trainingMax;
       if (tm) {
@@ -123,7 +133,7 @@ export class WorkoutSheetWriter {
             session.label,
             exercise.name,
             WorkoutSheetWriter.setLabel(set),
-            WorkoutSheetWriter.prescribedLabel(set, exercise, this.tms),
+            WorkoutSheetWriter.prescribedLabel(set, exercise, this.tms, this.timeExercises.has(exercise.name)),
             logged?.actualWeight ?? "",
             logged?.actualReps ?? "",
             logged?.actualRpe ?? "",
