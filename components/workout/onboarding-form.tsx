@@ -3,7 +3,6 @@
 import { apiUrl } from "@/lib/base-path";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { TM_FACTOR } from "@/lib/workout-program";
 
 const LIFTS: { id: string; label: string }[] = [
   { id: "squat", label: "Squat" },
@@ -13,13 +12,13 @@ const LIFTS: { id: string; label: string }[] = [
 
 type Entry = { e1rm: string; tm: string; tmTouched: boolean };
 
-function suggestTm(e1rm: string): string {
+function suggestTm(e1rm: string, tmFactor: number): string {
   const n = Number(e1rm);
   if (!Number.isFinite(n) || n <= 0) return "";
-  return String(Math.round(n * TM_FACTOR * 10) / 10);
+  return String(Math.round(n * tmFactor * 10) / 10);
 }
 
-export default function OnboardingForm() {
+export default function OnboardingForm({ tmFactor }: { tmFactor: number }) {
   const router = useRouter();
   const [entries, setEntries] = useState<Record<string, Entry>>(() =>
     Object.fromEntries(LIFTS.map((l) => [l.id, { e1rm: "", tm: "", tmTouched: false }]))
@@ -35,8 +34,8 @@ export default function OnboardingForm() {
         [id]: {
           ...cur,
           e1rm: value,
-          // Keep TM in sync with the 90% suggestion until the user edits it.
-          tm: cur.tmTouched ? cur.tm : suggestTm(value),
+          // Keep TM in sync with the suggested factor until the user edits it.
+          tm: cur.tmTouched ? cur.tm : suggestTm(value, tmFactor),
         },
       };
     });
@@ -81,8 +80,8 @@ export default function OnboardingForm() {
       <div className="space-y-1">
         <h1 className="text-xl font-semibold text-[#f5f5f5]">Set your training maxes</h1>
         <p className="text-sm text-[#8e8e93]">
-          Enter your estimated 1-rep max for each lift. Training max defaults to 90%
-          (Calgary Barbell). Adjust if you want.
+          Enter your estimated 1-rep max for each lift. Training max defaults to{" "}
+          {Math.round(tmFactor * 1000) / 10}%. Adjust if you want.
         </p>
       </div>
 

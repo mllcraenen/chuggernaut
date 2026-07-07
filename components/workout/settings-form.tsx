@@ -4,12 +4,11 @@ import { apiUrl } from "@/lib/base-path";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { LiftId, TrainingMax, TmHistoryEntry } from "@/lib/workout";
-import { TM_FACTOR } from "@/lib/workout-program";
 
-function suggestTm(e1rm: string): string {
+function suggestTm(e1rm: string, tmFactor: number): string {
   const n = Number(e1rm);
   if (!Number.isFinite(n) || n <= 0) return "";
-  return String(Math.round(n * TM_FACTOR * 10) / 10);
+  return String(Math.round(n * tmFactor * 10) / 10);
 }
 
 type Entry = { e1rm: string; tm: string; tmTouched: boolean };
@@ -63,10 +62,12 @@ export default function SettingsForm({
   lifts,
   currentTms,
   history = {},
+  tmFactor,
 }: {
   lifts: { id: LiftId; label: string }[];
   currentTms: Record<string, TrainingMax>;
   history?: Record<string, TmHistoryEntry[]>;
+  tmFactor: number;
 }) {
   const router = useRouter();
 
@@ -99,7 +100,7 @@ export default function SettingsForm({
         [id]: {
           ...cur,
           e1rm: value,
-          tm: cur.tmTouched ? cur.tm : suggestTm(value),
+          tm: cur.tmTouched ? cur.tm : suggestTm(value, tmFactor),
         },
       };
     });

@@ -1,5 +1,5 @@
 import { getDb } from "./workout-db";
-import { PROGRAM, PROGRAM_WEEKS } from "./workout-program";
+import { PROGRAM, PROGRAM_WEEKS, TM_FACTOR as TM_FACTOR_DEFAULT } from "./workout-program";
 import { markDirty } from "./sheets-sync";
 
 // ----- Key-value settings -----
@@ -57,6 +57,15 @@ export function isLiftId(value: unknown): value is LiftId {
 // Canonical TM factor lives in workout-program.ts (client-safe); re-exported
 // here for server-side callers already importing from lib/workout.
 export { TM_FACTOR } from "./workout-program";
+
+// Effective TM factor: the user-configurable `tm_factor` setting when valid,
+// otherwise the program default. All e1RM→TM derivations (server routes and
+// props handed to client forms) must go through this, never TM_FACTOR raw.
+export function getTmFactor(): number {
+  const raw = getSetting("tm_factor");
+  const n = raw == null ? NaN : Number(raw);
+  return Number.isFinite(n) && n >= 0.5 && n <= 1 ? n : TM_FACTOR_DEFAULT;
+}
 
 // Epley estimated 1RM. Null for non-positive weight/reps — a 0 kg or
 // negative "lift" has no meaningful 1RM (bodyweight-aware e1RM lands in 3.4).

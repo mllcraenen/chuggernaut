@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { isOnboarded, getE1rmHistory, getCompletedSessions, getBodyWeightHistory, LIFTS } from "@/lib/workout";
 import WorkoutTabBar from "@/components/workout/workout-tab-bar";
 import { importIfStale } from "@/lib/workout-sheets";
@@ -78,7 +79,7 @@ export default async function HistoryPage() {
                     day: "numeric", month: "short", year: "numeric",
                   });
                   return (
-                    <a
+                    <Link
                       key={`${s.week}-${s.day}`}
                       href={`/workout/session/${s.week}/${s.day}`}
                       className="flex items-center justify-between px-4 py-3 hover:bg-[#242f4a] transition-colors"
@@ -95,7 +96,7 @@ export default async function HistoryPage() {
                         </p>
                         <span className="text-[#3d5080] text-sm">›</span>
                       </div>
-                    </a>
+                    </Link>
                   );
                 })}
               </div>

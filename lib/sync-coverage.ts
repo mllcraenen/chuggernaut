@@ -53,6 +53,11 @@ export const SETTINGS_KEY_COVERAGE: Record<string, SyncCoverage> = {
     tab: TAB_SETTINGS,
     reason: "user-entered equipment preference",
   },
+  tm_factor: {
+    mode: "export-only",
+    tab: TAB_SETTINGS,
+    reason: "user-configurable e1RM→TM factor (default 0.88)",
+  },
   tm_autoregulation_log: {
     mode: "exempt",
     reason: "derived provenance; becomes the Phase 4 TM History tab",
