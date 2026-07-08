@@ -3,10 +3,11 @@ import { getSetting, setSetting, getTrainingMaxes, computeSetE1rm, validateSetWe
 import { PROGRAM, PROGRAM_BLOCKS } from "./workout-program";
 import { isDirty, clearDirty, markDirty } from "./sheets-sync";
 import { WorkoutSheetWriter, type BlockDefinition } from "./sheet-writer";
-import { TAB_SESSIONS, TAB_SETTINGS, TAB_EXERCISES, SHEET_EXPORTED_SETTINGS } from "./sync-coverage";
+import { TAB_SESSIONS, TAB_SETTINGS, TAB_EXERCISES, TAB_TM_HISTORY, SHEET_EXPORTED_SETTINGS } from "./sync-coverage";
 import { listExercises, getAlternativesFor } from "./exercise-registry";
+import { getTmEvents } from "./workout";
 
-export { TAB_SESSIONS, TAB_SETTINGS, TAB_EXERCISES };
+export { TAB_SESSIONS, TAB_SETTINGS, TAB_EXERCISES, TAB_TM_HISTORY };
 
 export type { BlockDefinition };
 
@@ -50,6 +51,19 @@ export const TAB_HEADERS: Record<string, string[]> = {
   [TAB_SESSIONS]: ["week", "day", "started_at", "completed_at"],
   [TAB_SETTINGS]: ["key", "value"],
   [TAB_EXERCISES]: ["name", "lift", "role", "load_mode", "rep_mode", "e1rm_mode", "archived", "alternatives"],
+  [TAB_TM_HISTORY]: [
+    "date",
+    "lift",
+    "e1rm",
+    "training_max",
+    "source",
+    "week",
+    "day",
+    "sets_used",
+    "implied_tm",
+    "damping",
+    "applied",
+  ],
 };
 
 // Block tabs come first so they are the landing view. Non-block tabs follow:
@@ -63,6 +77,7 @@ const TAB_ORDER = [
   TAB_SESSIONS,
   TAB_SETTINGS,
   TAB_EXERCISES,
+  TAB_TM_HISTORY,
 ];
 
 // Block tab names for test assertions and allow-list checks.
@@ -252,6 +267,21 @@ function readTabRows(tab: string): (string | number)[][] {
         getAlternativesFor(e.name).join(", "),
       ]);
     }
+    case TAB_TM_HISTORY: {
+      return getTmEvents().map((e) => [
+        e.createdAt,
+        e.lift,
+        cell(e.e1rm),
+        cell(e.tm),
+        e.source,
+        cell(e.sourceWeek),
+        cell(e.sourceDay),
+        cell(e.setsUsed),
+        cell(e.impliedTm),
+        cell(e.damping),
+        e.applied ? 1 : 0,
+      ]);
+    }
     default:
       return [];
   }
@@ -400,6 +430,7 @@ function upsertTabRows(tab: string, rows: unknown[][], hasNotesColumn = false): 
     case TAB_SESSIONS:
     case TAB_SETTINGS:
     case TAB_EXERCISES:
+    case TAB_TM_HISTORY:
       return 0;
     default:
       return 0;

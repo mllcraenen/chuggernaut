@@ -46,6 +46,7 @@ import {
   TAB_SESSIONS,
   TAB_SETTINGS,
   TAB_EXERCISES,
+  TAB_TM_HISTORY,
   BLOCKS,
 } from "@/lib/workout-sheets";
 import { WorkoutSheetWriter } from "@/lib/sheet-writer";
@@ -64,6 +65,7 @@ const ALL_TABS = [
   TAB_SESSIONS,
   TAB_SETTINGS,
   TAB_EXERCISES,
+  TAB_TM_HISTORY,
 ];
 
 function makeFakeSheets(getData: Record<string, unknown[][]> = {}) {
@@ -369,6 +371,44 @@ describe("Exercises tab", () => {
     const result = await importFromSheet({ sheets: impSheets as never, spreadsheetId: "SID" });
     expect(result.rowsByTab[TAB_EXERCISES]).toBe(0);
     const after = getDb().prepare("SELECT COUNT(*) AS n FROM workout_exercises").get<{ n: number }>()!.n;
+    expect(after).toBe(before);
+  });
+});
+
+// ---- TM History tab (Phase 4, export-only) ----
+
+describe("TM History tab", () => {
+  it("exports every TM event and skips the tab on import", async () => {
+    const { getTmEvents, setTrainingMaxes } = await import("@/lib/workout");
+    const { exportToSheet, importFromSheet } = await import("@/lib/workout-sheets");
+    const { getDb } = await import("@/lib/workout-db");
+
+    // Ensure at least one event exists (a changed manual save records one).
+    setTrainingMaxes([{ lift: "squat", e1rm: 200, trainingMax: 176 }]);
+    const events = getTmEvents();
+    expect(events.length).toBeGreaterThan(0);
+
+    const { sheets, updates } = makeFakeSheets();
+    await exportToSheet({ sheets: sheets as never, spreadsheetId: "SID" });
+    const tmUpdate = updates.find((u) => u.range.startsWith(`${TAB_TM_HISTORY}!`))!;
+    expect(tmUpdate.values[0]).toEqual([
+      "date", "lift", "e1rm", "training_max", "source",
+      "week", "day", "sets_used", "implied_tm", "damping", "applied",
+    ]);
+    expect(tmUpdate.values.length).toBe(1 + events.length);
+
+    // Import must never write events (export-only, no _key round-trip risk).
+    const before = getDb().prepare("SELECT COUNT(*) AS n FROM workout_tm_events").get<{ n: number }>()!.n;
+    const data = {
+      [TAB_TM_HISTORY]: [
+        tmUpdate.values[0],
+        ["2026-01-01T00:00:00Z", "squat", 300, 264, "manual", "", "", "", "", "", 1],
+      ] as unknown[][],
+    };
+    const { sheets: impSheets } = makeFakeSheets(data);
+    const result = await importFromSheet({ sheets: impSheets as never, spreadsheetId: "SID" });
+    expect(result.rowsByTab[TAB_TM_HISTORY]).toBe(0);
+    const after = getDb().prepare("SELECT COUNT(*) AS n FROM workout_tm_events").get<{ n: number }>()!.n;
     expect(after).toBe(before);
   });
 });

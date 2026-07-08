@@ -1,11 +1,13 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { isOnboarded, getE1rmHistory, getCompletedSessions, getBodyWeightHistory, LIFTS } from "@/lib/workout";
+import { isOnboarded, getE1rmHistory, getCompletedSessions, getBodyWeightHistory, getTmEvents, LIFTS } from "@/lib/workout";
 import WorkoutTabBar from "@/components/workout/workout-tab-bar";
 import { importIfStale } from "@/lib/workout-sheets";
 import E1rmChart from "@/components/workout/e1rm-chart";
 import BodyWeightSection from "@/components/workout/body-weight-section";
+import TmHistoryChart, { type TmChartPoint } from "@/components/workout/tm-history-chart";
+import TmExplainer from "@/components/workout/tm-explainer";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,6 +24,16 @@ export default async function HistoryPage() {
   );
   const sessions = getCompletedSessions();
   const bodyWeight = getBodyWeightHistory();
+
+  // Applied TM events per lift (manual + auto) for the step-line charts.
+  const tmPoints: Record<string, TmChartPoint[]> = Object.fromEntries(
+    LIFTS.map((l) => [l.id, [] as TmChartPoint[]])
+  );
+  for (const e of getTmEvents()) {
+    if (e.applied) {
+      tmPoints[e.lift]?.push({ tm: e.tm, source: e.source, createdAt: e.createdAt });
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#141b2d] text-[#f5f5f5]">
@@ -66,6 +78,36 @@ export default async function HistoryPage() {
                   </div>
                 );
               })}
+            </section>
+
+            {/* TM history per lift */}
+            <section className="space-y-3">
+              <p className="text-xs font-semibold text-[#8e8e93] uppercase tracking-widest px-1">
+                Training max history
+              </p>
+              {LIFTS.map((lift) => {
+                const points = tmPoints[lift.id] ?? [];
+                return (
+                  <div key={lift.id} className="rounded-xl border border-[#2a3352] bg-[#1e2740] overflow-hidden">
+                    <div className="px-4 pt-3 pb-1 flex items-baseline justify-between">
+                      <span className="text-sm font-bold text-[#f5f5f5]">{lift.label}</span>
+                      {points.length > 0 && (
+                        <span className="text-sm font-mono text-[#e8a23a]">
+                          {points[points.length - 1].tm} kg
+                        </span>
+                      )}
+                    </div>
+                    {points.length < 2 ? (
+                      <p className="px-4 pb-3 text-xs text-[#3d5080]">
+                        {points.length === 0 ? "No data yet" : "TM changes will chart here"}
+                      </p>
+                    ) : (
+                      <TmHistoryChart points={points} />
+                    )}
+                  </div>
+                );
+              })}
+              <TmExplainer />
             </section>
 
             {/* Session log */}

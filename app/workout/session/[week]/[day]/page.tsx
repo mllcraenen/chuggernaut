@@ -10,6 +10,7 @@ import {
   getNotesForSession,
   isOnboarded,
   getLatestBodyWeightKg,
+  getTmProvenance,
 } from "@/lib/workout";
 import { getExercise } from "@/lib/exercise-registry";
 import {
@@ -21,6 +22,7 @@ import {
 import SessionClient, {
   type SessionExercise,
   type PrevSet,
+  type TmProvenanceView,
 } from "@/components/workout/session-client";
 import WorkoutTabBar from "@/components/workout/workout-tab-bar";
 import SessionTimer from "@/components/workout/session-timer";
@@ -150,6 +152,25 @@ export default async function SessionPage({ params }: Params) {
 
   const notes = getNotesForSession(week, day);
 
+  // Provenance of each lift's current TM — powers the "why this weight?"
+  // popover on prescribed weights. Current TM value stays authoritative from
+  // workout_training_maxes; the event adds the how/when context.
+  const provenanceEvents = getTmProvenance();
+  const tmProvenance: Record<string, TmProvenanceView> = {};
+  for (const [liftId, tmRow] of Object.entries(tms)) {
+    const ev = provenanceEvents[liftId as keyof typeof provenanceEvents];
+    tmProvenance[liftId] = {
+      tm: tmRow.trainingMax,
+      setAt: (ev?.createdAt ?? tmRow.setAt).slice(0, 10),
+      source: ev?.source ?? "manual",
+      sourceWeek: ev?.sourceWeek ?? null,
+      sourceDay: ev?.sourceDay ?? null,
+      setsUsed: ev?.setsUsed ?? null,
+      impliedTm: ev?.impliedTm ?? null,
+      damping: ev?.damping ?? null,
+    };
+  }
+
   // Prev / next day navigation (wraps across weeks)
   const totalDays = PROGRAM_WEEKS * PROGRAM_DAYS;
   const currentIndex = (week - 1) * PROGRAM_DAYS + (day - 1); // 0-based
@@ -211,6 +232,7 @@ export default async function SessionPage({ params }: Params) {
         completedAt={sessionRow?.completedAt ?? null}
         notes={notes}
         bodyWeightKg={getLatestBodyWeightKg(sessionRow.startedAt?.slice(0, 10))}
+        tmProvenance={tmProvenance}
       />
       <WorkoutTabBar />
     </div>

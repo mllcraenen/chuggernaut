@@ -4,9 +4,9 @@ import { useState } from "react";
 import type { LiftId } from "@/lib/workout";
 import type { AdjustmentSuggestion } from "@/lib/autoregulation";
 
-// Local label map — avoids importing the runtime LIFTS value from lib/workout
-// (which would pull node:sqlite into the client bundle).
-const LIFT_LABELS: Record<LiftId, string> = {
+// Client-safe label map — avoids importing the runtime LIFTS value from
+// lib/workout (which would pull node:sqlite into the client bundle).
+export const LIFT_LABELS: Record<LiftId, string> = {
   squat: "Squat",
   bench: "Bench Press",
   deadlift: "Deadlift",

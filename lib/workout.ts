@@ -68,6 +68,17 @@ export function getTmFactor(): number {
   return Number.isFinite(n) && n >= 0.5 && n <= 1 ? n : TM_FACTOR_DEFAULT;
 }
 
+// Auto-apply toggle for TM suggestions (D2). Default off: suggest-then-confirm.
+// Sheet-exported (App Settings tab), so the setter flags the sheet dirty.
+export function isTmAutoApplyEnabled(): boolean {
+  return getSetting("tm_auto_apply") === "1";
+}
+
+export function setTmAutoApply(on: boolean): void {
+  setSetting("tm_auto_apply", on ? "1" : "0");
+  markDirty();
+}
+
 // Epley estimated 1RM. Null for non-positive weight/reps — a 0 kg or
 // negative "lift" has no meaningful 1RM.
 export function epley1rm(weight: number, reps: number): number | null {
@@ -203,10 +214,188 @@ export interface TrainingMaxInput {
   trainingMax: number;
 }
 
-// Append a new training-max row per lift. History is preserved.
-// Returns the ISO timestamp stamped on the new rows (shared across the batch),
-// which callers use to tag autoregulation-sourced entries.
-export function setTrainingMaxes(entries: TrainingMaxInput[]): string {
+// ----- TM provenance events -----
+//
+// Every training-max change is recorded in workout_tm_events with full
+// context, so the UI can answer "why did my prescribed weight change?".
+//   manual     — settings/onboarding save
+//   auto       — autoregulation suggestion applied (confirmed or auto-apply)
+//   suggestion — suggestion presented but not applied (applied = 0)
+// The pre-Phase-4 JSON tag log (tm_autoregulation_log) is migrated in on
+// first access and no longer written.
+
+export type TmEventSource = "manual" | "auto" | "suggestion";
+
+export interface TmEvent {
+  id: number;
+  lift: LiftId;
+  e1rm: number;
+  tm: number;
+  source: TmEventSource;
+  sourceWeek: number | null;
+  sourceDay: number | null;
+  setsUsed: number | null;
+  impliedTm: number | null;
+  damping: number | null;
+  applied: boolean;
+  createdAt: string;
+}
+
+export interface TmEventMeta {
+  source: TmEventSource;
+  sourceWeek?: number | null;
+  sourceDay?: number | null;
+  setsUsed?: number | null;
+  impliedTm?: number | null;
+  damping?: number | null;
+  applied?: boolean;
+}
+
+interface TmEventDbRow {
+  id: number;
+  lift: string;
+  e1rm: number;
+  tm: number;
+  source: string;
+  source_week: number | null;
+  source_day: number | null;
+  sets_used: number | null;
+  implied_tm: number | null;
+  damping: number | null;
+  applied: number;
+  created_at: string;
+}
+
+const TM_EVENT_INSERT = `INSERT INTO workout_tm_events
+  (lift, e1rm, tm, source, source_week, source_day, sets_used, implied_tm, damping, applied, created_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+const TM_AUTO_LOG_KEY = "tm_autoregulation_log";
+
+let tmEventsMigrated = false;
+
+// One-time backfill: turn the pre-events TM history (workout_training_maxes
+// rows + the legacy JSON auto-tag log) into events. Runs once per process and
+// only when the events table is empty, so it is idempotent across restarts.
+function ensureTmEventsMigrated(): void {
+  if (tmEventsMigrated) return;
+  tmEventsMigrated = true;
+  const db = getDb();
+  const n = db.prepare("SELECT COUNT(*) AS n FROM workout_tm_events").get<{ n: number }>()!.n;
+  if (n > 0) return;
+  const rows = db
+    .prepare(
+      "SELECT lift, e1rm, training_max, set_at FROM workout_training_maxes ORDER BY set_at ASC, id ASC"
+    )
+    .all<TmDbRow>();
+  if (rows.length === 0) return;
+
+  let autoTags: { lift: string; trainingMax: number; setAt: string }[] = [];
+  try {
+    const parsed = JSON.parse(getSetting(TM_AUTO_LOG_KEY) ?? "[]");
+    if (Array.isArray(parsed)) autoTags = parsed;
+  } catch {
+    // corrupt legacy log — treat everything as manual
+  }
+  const autoKeys = new Set(autoTags.map((e) => `${e.lift}|${e.trainingMax}@${e.setAt}`));
+
+  const stmt = db.prepare(TM_EVENT_INSERT);
+  for (const r of rows) {
+    if (!isLiftId(r.lift)) continue;
+    const source = autoKeys.has(`${r.lift}|${r.training_max}@${r.set_at}`) ? "auto" : "manual";
+    stmt.run(r.lift, r.e1rm, r.training_max, source, null, null, null, null, null, 1, r.set_at);
+  }
+  markDirty();
+}
+
+export function recordTmEvent(entry: TrainingMaxInput, meta: TmEventMeta, createdAt?: string): void {
+  ensureTmEventsMigrated();
+  getDb()
+    .prepare(TM_EVENT_INSERT)
+    .run(
+      entry.lift,
+      entry.e1rm,
+      entry.trainingMax,
+      meta.source,
+      meta.sourceWeek ?? null,
+      meta.sourceDay ?? null,
+      meta.setsUsed ?? null,
+      meta.impliedTm ?? null,
+      meta.damping ?? null,
+      meta.applied === false ? 0 : 1,
+      createdAt ?? new Date().toISOString()
+    );
+  markDirty();
+}
+
+// All events, oldest first (optionally for one lift). Feeds the TM history
+// chart, the provenance popover, and the TM History sheet tab.
+export function getTmEvents(lift?: LiftId): TmEvent[] {
+  ensureTmEventsMigrated();
+  const db = getDb();
+  const rows = lift
+    ? db
+        .prepare(
+          "SELECT * FROM workout_tm_events WHERE lift = ? ORDER BY created_at ASC, id ASC"
+        )
+        .all<TmEventDbRow>(lift)
+    : db.prepare("SELECT * FROM workout_tm_events ORDER BY created_at ASC, id ASC").all<TmEventDbRow>();
+  return rows
+    .filter((r) => isLiftId(r.lift))
+    .map((r) => ({
+      id: r.id,
+      lift: r.lift as LiftId,
+      e1rm: r.e1rm,
+      tm: r.tm,
+      source: r.source as TmEventSource,
+      sourceWeek: r.source_week,
+      sourceDay: r.source_day,
+      setsUsed: r.sets_used,
+      impliedTm: r.implied_tm,
+      damping: r.damping,
+      applied: r.applied === 1,
+      createdAt: r.created_at,
+    }));
+}
+
+// Latest applied event per lift — the provenance of the current TM.
+export function getTmProvenance(): Partial<Record<LiftId, TmEvent>> {
+  const out: Partial<Record<LiftId, TmEvent>> = {};
+  for (const e of getTmEvents()) {
+    if (e.applied) out[e.lift] = e;
+  }
+  return out;
+}
+
+// Idempotency guard: has this (lift, week, day) already produced an event of
+// this source? Prevents double auto-apply and duplicate suggestion records.
+export function hasTmEvent(
+  lift: LiftId,
+  week: number,
+  day: number,
+  source: TmEventSource
+): boolean {
+  ensureTmEventsMigrated();
+  const row = getDb()
+    .prepare(
+      "SELECT COUNT(*) AS n FROM workout_tm_events WHERE lift = ? AND source_week = ? AND source_day = ? AND source = ?"
+    )
+    .get<{ n: number }>(lift, week, day, source);
+  return (row?.n ?? 0) > 0;
+}
+
+// Append a new training-max row per lift; history is preserved. Each entry
+// whose values actually changed (or that is the lift's first TM) also gets a
+// provenance event — meta defaults to a manual save.
+// Returns the ISO timestamp stamped on the new rows (shared across the batch).
+export function setTrainingMaxes(
+  entries: TrainingMaxInput[],
+  meta: TmEventMeta = { source: "manual" }
+): string {
+  // Migrate first: otherwise the rows inserted below would be swept into the
+  // backfill AND get a fresh event each (duplicates).
+  ensureTmEventsMigrated();
+  const before = getTrainingMaxes();
   const db = getDb();
   const now = new Date().toISOString();
   const stmt = db.prepare(
@@ -214,42 +403,13 @@ export function setTrainingMaxes(entries: TrainingMaxInput[]): string {
   );
   for (const e of entries) {
     stmt.run(e.lift, e.e1rm, e.trainingMax, now);
+    const prev = before[e.lift];
+    if (!prev || prev.e1rm !== e.e1rm || prev.trainingMax !== e.trainingMax) {
+      recordTmEvent(e, meta, now);
+    }
   }
   markDirty();
   return now;
-}
-
-// ----- Autoregulation tagging -----
-//
-// We cannot add a "reason" column without a migration, so entries created by
-// the autoregulation flow are tagged in a JSON log under workout_settings.
-// Each tag identifies a TM row by lift + trainingMax + setAt.
-
-const TM_AUTO_LOG_KEY = "tm_autoregulation_log";
-
-export interface TmAutoLogEntry {
-  lift: LiftId;
-  trainingMax: number;
-  setAt: string;
-}
-
-export function getTmAutoLog(): TmAutoLogEntry[] {
-  const raw = getSetting(TM_AUTO_LOG_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as TmAutoLogEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-// Tag the given lifts' TM rows (stamped at setAt) as autoregulation-sourced.
-export function appendTmAutoLog(entries: TmAutoLogEntry[]): void {
-  if (entries.length === 0) return;
-  const log = getTmAutoLog();
-  log.push(...entries);
-  setSetting(TM_AUTO_LOG_KEY, JSON.stringify(log));
 }
 
 export interface TmHistoryEntry {
@@ -259,27 +419,17 @@ export interface TmHistoryEntry {
   reason: "Auto" | "Manual";
 }
 
-// Full TM history for a lift, oldest first, each tagged Auto or Manual based on
-// the autoregulation log.
+// Full TM history for a lift, oldest first, tagged Auto or Manual. Reads the
+// events table (which the legacy JSON log is migrated into).
 export function getTmHistory(lift: LiftId): TmHistoryEntry[] {
-  const rows = getDb()
-    .prepare(
-      "SELECT e1rm, training_max, set_at FROM workout_training_maxes WHERE lift = ? ORDER BY set_at ASC, id ASC"
-    )
-    .all<{ e1rm: number; training_max: number; set_at: string }>(lift);
-
-  const autoKeys = new Set(
-    getTmAutoLog()
-      .filter((e) => e.lift === lift)
-      .map((e) => `${e.trainingMax}@${e.setAt}`)
-  );
-
-  return rows.map((r) => ({
-    trainingMax: r.training_max,
-    e1rm: r.e1rm,
-    setAt: r.set_at,
-    reason: autoKeys.has(`${r.training_max}@${r.set_at}`) ? "Auto" : "Manual",
-  }));
+  return getTmEvents(lift)
+    .filter((e) => e.applied)
+    .map((e) => ({
+      trainingMax: e.tm,
+      e1rm: e.e1rm,
+      setAt: e.createdAt,
+      reason: e.source === "auto" ? "Auto" : "Manual",
+    }));
 }
 
 // ----- Sessions -----

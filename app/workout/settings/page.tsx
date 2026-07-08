@@ -4,10 +4,11 @@ import Link from "next/link";
 import SettingsForm from "@/components/workout/settings-form";
 import WorkoutTabBar from "@/components/workout/workout-tab-bar";
 import UnitToggle from "@/components/workout/unit-toggle";
-import { getTrainingMaxes, getGoalDate, getSetting, getTmFactor, getTmHistory, LIFTS, type TmHistoryEntry } from "@/lib/workout";
+import { getTrainingMaxes, getGoalDate, getSetting, getTmFactor, getTmHistory, isTmAutoApplyEnabled, LIFTS, type TmHistoryEntry } from "@/lib/workout";
 import BarWeightSelector from "@/components/workout/bar-weight-selector";
 import TmFactorInput from "@/components/workout/tm-factor-input";
 import GoalDateForm from "@/components/workout/goal-date-form";
+import AutoApplyToggle from "@/components/workout/auto-apply-toggle";
 import SheetsSyncForm from "@/components/workout/sheets-sync-form";
 import { getStatus, SETTING_SPREADSHEET_ID, importIfStale } from "@/lib/workout-sheets";
 
@@ -60,6 +61,7 @@ export default async function WorkoutSettingsPage() {
               <GoalDateForm current={goalDate} />
               <BarWeightSelector initial={barWeight} />
               <TmFactorInput initial={tmFactor} />
+              <AutoApplyToggle initial={isTmAutoApplyEnabled()} />
             </div>
           </div>
 

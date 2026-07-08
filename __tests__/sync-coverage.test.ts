@@ -194,6 +194,17 @@ describe("mutators mark the sheet dirty", () => {
       clearDirty();
       reg.setExerciseArchived(ex.id, true);
     }],
+    ["recordTmEvent", async () => {
+      const w = await import("@/lib/workout");
+      w.recordTmEvent(
+        { lift: "squat", e1rm: 180, trainingMax: 158 },
+        { source: "manual" }
+      );
+    }],
+    ["setTmAutoApply", async () => {
+      const w = await import("@/lib/workout");
+      w.setTmAutoApply(true);
+    }],
     ["setAlternatives", async () => {
       const reg = await import("@/lib/exercise-registry");
       const ex = reg.createExercise({

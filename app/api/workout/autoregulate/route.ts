@@ -1,28 +1,28 @@
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
+import { isLiftId, type LiftId } from "@/lib/workout";
+import { PROGRAM_WEEKS, PROGRAM_DAYS } from "@/lib/workout-program";
 import {
-  getSetsForSession,
-  getTrainingMaxes,
-  getSwapsForSession,
-} from "@/lib/workout";
-import { getProgramDay } from "@/lib/workout-program";
-import {
-  computeSessionAdjustments,
-  type AutoregSet,
-} from "@/lib/autoregulation";
+  applySessionAdjustments,
+  computeAdjustmentsForSession,
+  maybeAutoApply,
+  recordSuggestionEvents,
+} from "@/lib/autoregulation-db";
+import { triggerExportIfDue } from "@/lib/workout-sheets";
 
 export const dynamic = "force-dynamic";
-
-const WEEKS = 16;
-const DAYS = 4;
 
 function num(v: unknown): number | null {
   const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN;
   return Number.isFinite(n) ? n : null;
 }
 
-// Body: { week, day }. Returns TM adjustment suggestions for the session's
-// main lifts based on prescribed-vs-actual RPE. Pure read — applies nothing.
+// Body: { week, day }            → TM suggestions for the session (records
+//                                  suggestion events; auto-applies instead
+//                                  when the tm_auto_apply setting is on).
+// Body: { week, day, apply: [] } → apply the named lifts' suggestions,
+//                                  recomputed server-side (client numbers are
+//                                  never trusted), idempotent per lift/session.
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -30,48 +30,32 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   const week = num(body?.week);
   const day = num(body?.day);
-  if (week === null || day === null || week < 1 || week > WEEKS || day < 1 || day > DAYS) {
+  if (
+    week === null || day === null ||
+    week < 1 || week > PROGRAM_WEEKS ||
+    day < 1 || day > PROGRAM_DAYS
+  ) {
     return NextResponse.json({ error: "invalid week/day" }, { status: 400 });
   }
 
-  const programDay = getProgramDay(week, day);
-  if (!programDay) {
-    return NextResponse.json({ suggestions: [] });
+  if (Array.isArray(body?.apply)) {
+    const lifts = (body.apply as unknown[]).filter((l): l is LiftId => isLiftId(l));
+    const applied = applySessionAdjustments(week, day, lifts);
+    const res = NextResponse.json({ applied });
+    triggerExportIfDue();
+    return res;
   }
 
-  // Map each prescribed set (under its effective, possibly-swapped name) to the
-  // lift and %TM it was programmed at, so logged rows can be enriched.
-  const swapMap = getSwapsForSession(week, day);
-  const prescribedByKey = new Map<
-    string,
-    { lift: AutoregSet["lift"]; percentOfTM: number | null }
-  >();
-  for (const ex of programDay.exercises) {
-    const effectiveName = swapMap[ex.name] ?? ex.name;
-    for (const set of ex.sets) {
-      prescribedByKey.set(`${effectiveName}#${set.setNumber}`, {
-        lift: ex.lift,
-        percentOfTM: set.percentOfTM,
-      });
-    }
+  const autoApplied = maybeAutoApply(week, day);
+  if (autoApplied !== null) {
+    const res = NextResponse.json({ suggestions: [], autoApplied });
+    triggerExportIfDue();
+    return res;
   }
 
-  const loggedSets = getSetsForSession(week, day);
-  const inputs: AutoregSet[] = loggedSets
-    .filter((s) => s.loggedAt)
-    .map((s) => {
-      const prescribed = prescribedByKey.get(`${s.exercise}#${s.setNumber}`);
-      return {
-        lift: prescribed?.lift ?? null,
-        setNumber: s.setNumber,
-        prescribedPercent: prescribed?.percentOfTM ?? null,
-        prescribedRpe: s.prescribedRpe,
-        actualWeight: s.actualWeight,
-        actualReps: s.actualReps,
-        actualRpe: s.actualRpe,
-      };
-    });
-
-  const suggestions = computeSessionAdjustments(inputs, getTrainingMaxes());
-  return NextResponse.json({ suggestions });
+  const suggestions = computeAdjustmentsForSession(week, day);
+  recordSuggestionEvents(week, day, suggestions);
+  const res = NextResponse.json({ suggestions });
+  if (suggestions.length > 0) triggerExportIfDue();
+  return res;
 }

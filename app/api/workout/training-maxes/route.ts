@@ -7,10 +7,8 @@ import {
   getTrainingMaxes,
   isOnboarded,
   setTrainingMaxes,
-  appendTmAutoLog,
   isLiftId,
   type TrainingMaxInput,
-  type LiftId,
 } from "@/lib/workout";
 
 export const dynamic = "force-dynamic";
@@ -72,17 +70,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const setAt = setTrainingMaxes(entries);
-
-  // Tag any autoregulation-sourced lifts so settings can label them "Auto".
-  const autoRaw = body?.autoLifts;
-  if (Array.isArray(autoRaw)) {
-    const autoLifts = new Set(autoRaw.filter((l): l is LiftId => isLiftId(l)));
-    const tags = entries
-      .filter((e) => autoLifts.has(e.lift))
-      .map((e) => ({ lift: e.lift, trainingMax: e.trainingMax, setAt }));
-    appendTmAutoLog(tags);
-  }
+  // Manual save: unchanged lifts produce no event, so posting all four lifts
+  // (the endpoint requires it) doesn't spam the provenance history.
+  // Autoregulation applies go through /api/workout/autoregulate instead.
+  setTrainingMaxes(entries, { source: "manual" });
 
   const result = NextResponse.json(
     { onboarded: isOnboarded(), trainingMaxes: getTrainingMaxes() },
