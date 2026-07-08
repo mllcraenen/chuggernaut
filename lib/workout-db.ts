@@ -93,6 +93,21 @@ CREATE TABLE IF NOT EXISTS workout_exercise_alternatives (
   PRIMARY KEY (exercise_id, alternative_id)
 );
 
+CREATE TABLE IF NOT EXISTS workout_tm_events (
+  id INTEGER PRIMARY KEY,
+  lift TEXT NOT NULL,
+  e1rm REAL NOT NULL,
+  tm REAL NOT NULL,
+  source TEXT NOT NULL CHECK(source IN ('manual','auto','suggestion')),
+  source_week INTEGER,
+  source_day INTEGER,
+  sets_used INTEGER,
+  implied_tm REAL,
+  damping REAL,
+  applied INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_week_day
   ON workout_sessions(week, day);
 CREATE INDEX IF NOT EXISTS idx_sets_week_day

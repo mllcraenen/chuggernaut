@@ -9,9 +9,8 @@ import { UnitProvider, useUnit } from "@/components/workout/unit-context";
 import { kgToDisplay, displayToKg, unitLabel, KG_TO_LBS } from "@/lib/units";
 import type { Unit } from "@/lib/units";
 import { calculatePlates } from "@/lib/plate-calculator";
-import AutoregulateSheet from "@/components/workout/autoregulate-sheet";
+import AutoregulateSheet, { LIFT_LABELS } from "@/components/workout/autoregulate-sheet";
 import type { AdjustmentSuggestion } from "@/lib/autoregulation";
-import { TM_FACTOR } from "@/lib/workout-program";
 
 // ----- Types (shared with the server page) -----
 
@@ -58,6 +57,19 @@ export type PrevSet = {
   prescribedRpe: number | null;
 };
 
+// Provenance of a lift's current TM (from workout_tm_events) — feeds the
+// "why this weight?" popover. All weights in kg.
+export type TmProvenanceView = {
+  tm: number;
+  setAt: string; // YYYY-MM-DD
+  source: "manual" | "auto" | "suggestion";
+  sourceWeek: number | null;
+  sourceDay: number | null;
+  setsUsed: number | null;
+  impliedTm: number | null;
+  damping: number | null;
+};
+
 // "@8 (prescribed @7)" — actual RPE next to what that set called for back then.
 function prevRpeSuffix(prev: PrevSet): string {
   if (prev.rpe == null) return "";
@@ -76,6 +88,8 @@ type Props = {
   // Latest logged body weight at the session date — used to preview e1RM for
   // bodyweight/assisted exercises. Null when never logged.
   bodyWeightKg: number | null;
+  // Per-lift TM provenance, keyed by lift id.
+  tmProvenance: Record<string, TmProvenanceView>;
 };
 
 function epley(weight: number, reps: number): number {
@@ -106,6 +120,7 @@ function SessionInner({
   completedAt: initialCompletedAt,
   notes: initialNotes,
   bodyWeightKg,
+  tmProvenance,
 }: Props) {
   const router = useRouter();
 
@@ -131,6 +146,7 @@ function SessionInner({
   const [error, setError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<AdjustmentSuggestion[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [autoApplied, setAutoApplied] = useState<AdjustmentSuggestion[]>([]);
   const [barKg, setBarKg] = useState<number>(20);
   const [notes, setNotes] = useState<Record<string, string>>(initialNotes);
 
@@ -249,8 +265,9 @@ function SessionInner({
     [week, day, router]
   );
 
-  // Persist accepted TM suggestions, then mark the session complete. Other
-  // lifts keep their current TM so the (all-four) endpoint stays satisfied.
+  // Persist accepted TM suggestions, then mark the session complete. The
+  // server recomputes and applies the suggestions itself (idempotent per
+  // lift/session) — the client only names the accepted lifts.
   const applyAdjustments = useCallback(
     async (acceptedLifts: LiftId[]) => {
       setSheetOpen(false);
@@ -258,33 +275,11 @@ function SessionInner({
       setError(null);
       try {
         if (acceptedLifts.length > 0) {
-          const tmRes = await fetch(apiUrl("/api/workout/training-maxes"));
-          if (tmRes.ok) {
-            const tmData = await tmRes.json();
-            const current = (tmData?.trainingMaxes ?? {}) as Record<
-              string,
-              { lift: LiftId; e1rm: number; trainingMax: number }
-            >;
-            const factor = Number(tmData?.tmFactor) || TM_FACTOR;
-            const suggMap = new Map(suggestions.map((s) => [s.lift, s.suggestedTm]));
-            const acceptedSet = new Set(acceptedLifts);
-            const maxes = Object.values(current).map((cur) => {
-              if (acceptedSet.has(cur.lift) && suggMap.has(cur.lift)) {
-                const tm = suggMap.get(cur.lift)!;
-                return {
-                  lift: cur.lift,
-                  e1rm: Math.round((tm / factor) * 10) / 10,
-                  trainingMax: tm,
-                };
-              }
-              return { lift: cur.lift, e1rm: cur.e1rm, trainingMax: cur.trainingMax };
-            });
-            await fetch(apiUrl("/api/workout/training-maxes"), {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ maxes, autoLifts: acceptedLifts }),
-            });
-          }
+          await fetch(apiUrl("/api/workout/autoregulate"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ week, day, apply: acceptedLifts }),
+          });
         }
         await finalizeSession("complete");
       } catch (e) {
@@ -293,7 +288,7 @@ function SessionInner({
         setFinishing(false);
       }
     },
-    [suggestions, finalizeSession]
+    [week, day, finalizeSession]
   );
 
   async function toggleFinish() {
@@ -320,6 +315,13 @@ function SessionInner({
         body: JSON.stringify({ week, day }),
       });
       const data = res.ok ? await res.json().catch(() => null) : null;
+      // Auto-apply on: the server already applied the adjustments — surface
+      // what changed instead of opening the confirm sheet.
+      if (Array.isArray(data?.autoApplied) && data.autoApplied.length > 0) {
+        setAutoApplied(data.autoApplied as AdjustmentSuggestion[]);
+        await finalizeSession("complete");
+        return;
+      }
       const next: AdjustmentSuggestion[] = Array.isArray(data?.suggestions)
         ? data.suggestions
         : [];
@@ -354,6 +356,21 @@ function SessionInner({
         {completedAt && <span className="text-xs font-medium text-[#30d158]">✓ Completed</span>}
       </div>
 
+      {autoApplied.length > 0 && (
+        <div className="rounded-lg border border-[#2a3352] bg-[#1e2740] px-3 py-2 text-xs text-[#8e8e93]">
+          <span className="font-medium text-[#f5f5f5]">TM auto-applied:</span>{" "}
+          {autoApplied
+            .map(
+              (s) =>
+                `${LIFT_LABELS[s.lift]} ${
+                  s.deltaKg >= 0 ? "+" : ""
+                }${s.deltaKg} kg → ${s.suggestedTm} kg`
+            )
+            .join(", ")}{" "}
+          — details in Settings → TM history.
+        </div>
+      )}
+
       {exercises.map((ex) => (
         <ExerciseCard
           key={ex.originalName}
@@ -364,6 +381,7 @@ function SessionInner({
           day={day}
           barKg={barKg}
           bodyWeightKg={bodyWeightKg}
+          provenance={ex.lift ? (tmProvenance[ex.lift] ?? null) : null}
           note={notes[ex.name] ?? null}
           onNoteChange={(n) => setNotes((prev) => {
             const next = { ...prev };
@@ -479,6 +497,7 @@ function ExerciseCard({
   day,
   barKg,
   bodyWeightKg,
+  provenance,
   note,
   onNoteChange,
   onLogged,
@@ -491,6 +510,7 @@ function ExerciseCard({
   day: number;
   barKg: number;
   bodyWeightKg: number | null;
+  provenance: TmProvenanceView | null;
   note: string | null;
   onNoteChange: (note: string | null) => void;
   onLogged: (setNumber: number, value: Logged | null) => void;
@@ -627,6 +647,7 @@ function ExerciseCard({
                 repMode={exercise.repMode}
                 e1rmMode={exercise.e1rmMode}
                 bodyWeightKg={bodyWeightKg}
+                provenance={provenance}
                 logged={logged[keyOf(exercise.name, s.setNumber)] ?? null}
                 prev={previous[keyOf(exercise.name, s.setNumber)] ?? null}
                 suggestedWeight={prevLoggedWeight}
@@ -717,6 +738,7 @@ function SetRow({
   repMode,
   e1rmMode,
   bodyWeightKg,
+  provenance,
   logged,
   prev,
   suggestedWeight,
@@ -733,6 +755,7 @@ function SetRow({
   repMode: SessionExercise["repMode"];
   e1rmMode: SessionExercise["e1rmMode"];
   bodyWeightKg: number | null;
+  provenance: TmProvenanceView | null;
   logged: Logged | null;
   prev: PrevSet | null;
   suggestedWeight: number | null;
@@ -743,7 +766,12 @@ function SetRow({
   const { unit } = useUnit();
   const [expanded, setExpanded] = useState(false);
   const [plateOpen, setPlateOpen] = useState(false);
+  const [provOpen, setProvOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
+
+  // "Why this weight?" — only for sets prescribed as %TM with a known TM.
+  const hasProvenance =
+    provenance != null && set.percentOfTM != null && set.prescribedWeight != null;
 
   // Input weight is always in the user's preferred unit; convert to kg on save.
   function toInputWeight(kg: number | null): string {
@@ -872,9 +900,30 @@ function SetRow({
         {/* Prescribed info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-[#f5f5f5]">
-              {kgToDisplay(set.prescribedWeight, unit)}
-            </span>
+            {hasProvenance ? (
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label="Why this weight?"
+                onClick={(e) => { e.stopPropagation(); setProvOpen((v) => !v); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setProvOpen((v) => !v);
+                  }
+                }}
+                className={`text-sm underline decoration-dotted underline-offset-4 transition-colors ${
+                  provOpen ? "text-[#e84545]" : "text-[#f5f5f5] decoration-[#3d5080]"
+                }`}
+              >
+                {kgToDisplay(set.prescribedWeight, unit)}
+              </span>
+            ) : (
+              <span className="text-sm text-[#f5f5f5]">
+                {kgToDisplay(set.prescribedWeight, unit)}
+              </span>
+            )}
             {set.prescribedWeight != null && (
               <button
                 type="button"
@@ -935,6 +984,32 @@ function SetRow({
           </div>
         )}
       </button>
+
+      {/* Prescribed-weight provenance */}
+      {provOpen && provenance != null && set.percentOfTM != null && set.prescribedWeight != null && (
+        <div className="mt-2 ml-11 rounded-lg border border-[#2a3352] bg-[#242f4a] px-3 py-2 space-y-1">
+          <p className="text-xs text-[#f5f5f5]">
+            TM {provenance.tm} kg × {set.percentOfTM}% ={" "}
+            {Math.round(((provenance.tm * set.percentOfTM) / 100) * 10) / 10} kg →{" "}
+            <span className="font-semibold">{set.prescribedWeight} kg</span> (plate-rounded)
+          </p>
+          <p className="text-[11px] text-[#8e8e93]">
+            TM set {provenance.setAt}{" "}
+            {provenance.source === "auto"
+              ? `via autoregulation${
+                  provenance.sourceWeek != null && provenance.sourceDay != null
+                    ? ` from W${provenance.sourceWeek}D${provenance.sourceDay}`
+                    : ""
+                }${provenance.setsUsed != null ? ` (${provenance.setsUsed} sets` : ""}${
+                  provenance.impliedTm != null ? `, implied ${provenance.impliedTm} kg` : ""
+                }${provenance.damping != null ? `, damping ${provenance.damping}` : ""}${
+                  provenance.setsUsed != null ? ")" : ""
+                }`
+              : "manually in Settings"}
+            {" · "}how this works: History → “How TM updates work”
+          </p>
+        </div>
+      )}
 
       {/* Plate loading preview */}
       {plateOpen && set.prescribedWeight != null && (

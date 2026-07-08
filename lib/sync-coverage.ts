@@ -22,6 +22,7 @@ export type SyncCoverage =
 export const TAB_SESSIONS = "Sessions";
 export const TAB_SETTINGS = "App Settings";
 export const TAB_EXERCISES = "Exercises";
+export const TAB_TM_HISTORY = "TM History";
 
 // Placeholder tab name for data spread across the per-block tabs.
 export const BLOCK_TABS = "<block tabs>";
@@ -51,6 +52,11 @@ export const TABLE_COVERAGE: Record<string, SyncCoverage> = {
     tab: TAB_EXERCISES,
     reason: "rendered as the alternatives column of the Exercises tab",
   },
+  workout_tm_events: {
+    mode: "export-only",
+    tab: TAB_TM_HISTORY,
+    reason: "TM provenance audit log — app-written, sheet copy is the human-readable record",
+  },
 };
 
 export const SETTINGS_KEY_COVERAGE: Record<string, SyncCoverage> = {
@@ -71,7 +77,12 @@ export const SETTINGS_KEY_COVERAGE: Record<string, SyncCoverage> = {
   },
   tm_autoregulation_log: {
     mode: "exempt",
-    reason: "derived provenance; becomes the Phase 4 TM History tab",
+    reason: "legacy tag log — migrated into workout_tm_events (Phase 4), kept only as migration source",
+  },
+  tm_auto_apply: {
+    mode: "export-only",
+    tab: TAB_SETTINGS,
+    reason: "user preference: auto-apply TM suggestions on session completion (D2 toggle)",
   },
   sheets_credentials: { mode: "exempt", reason: "secret — must never leave the DB" },
   sheets_spreadsheet_id: { mode: "exempt", reason: "sync machinery" },

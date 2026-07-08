@@ -83,10 +83,13 @@ export interface AdjustmentSuggestion {
   deltaKg: number;
   deltaPct: number;
   setsUsed: number;
+  // Weighted-average implied TM before damping/capping — kept for provenance.
+  impliedTm: number;
 }
 
 // Damping factor: move only part of the way toward the implied TM each session.
-const DAMPING = 0.6;
+// Exported so provenance events can record the rule that produced them.
+export const DAMPING = 0.6;
 // Never move a TM by more than this fraction in a single session.
 const MAX_DELTA_PCT = 0.05;
 // Ignore changes smaller than this fraction (noise).
@@ -159,6 +162,7 @@ export function computeSessionAdjustments(
       deltaKg: Math.round(delta * 10) / 10,
       deltaPct: Math.round((delta / currentTm) * 1000) / 10,
       setsUsed: liftSets.length,
+      impliedTm: round05(weightedAvg),
     });
   }
 
