@@ -344,7 +344,7 @@ function upsertTabRows(tab: string, rows: unknown[][], hasNotesColumn = false): 
       if (r.actualWeight != null && validateSetWeight(r.exercise, r.actualWeight) !== null) continue;
       if (r.actualReps != null && r.actualReps < 1) continue;
       const e1rm = (r.actualWeight != null && r.actualReps != null)
-        ? computeSetE1rm(r.exercise, r.actualWeight, r.actualReps)
+        ? computeSetE1rm(r.exercise, r.actualWeight, r.actualReps, undefined, r.actualRpe)
         : null;
       const found = exists.get<{ id: number }>(r.week, r.day, r.exercise, r.setNumber);
       if (found) {

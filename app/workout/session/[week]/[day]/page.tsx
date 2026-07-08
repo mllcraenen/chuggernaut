@@ -218,7 +218,7 @@ export default async function SessionPage({ params }: Params) {
             </div>
           </div>
           {sessionRow.startedAt && !sessionRow.completedAt && (
-            <SessionTimer startedAt={sessionRow.startedAt} />
+            <SessionTimer startedAt={sessionRow.startedAt} week={week} day={day} />
           )}
         </div>
       </header>

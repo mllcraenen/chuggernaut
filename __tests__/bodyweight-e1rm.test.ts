@@ -91,6 +91,39 @@ describe("validateSetWeight", () => {
   });
 });
 
+describe("RPE-aware e1RM (RIR-adjusted Epley)", () => {
+  it("credits reps in reserve: lower RPE → higher e1RM for the same set", async () => {
+    const w = await import("@/lib/workout");
+    // 1 rep @6 has ~4 reps in reserve → worth 5 effective reps.
+    expect(w.computeSetE1rm("Unknown Lift", 100, 1, undefined, 6)).toBe(
+      w.epley1rm(100, 5)
+    );
+    // @10 (true max effort) is plain Epley.
+    expect(w.computeSetE1rm("Unknown Lift", 100, 1, undefined, 10)).toBe(
+      w.epley1rm(100, 1)
+    );
+    // No reported RPE keeps the pre-existing plain-Epley behaviour.
+    expect(w.computeSetE1rm("Unknown Lift", 100, 1)).toBe(w.epley1rm(100, 1));
+  });
+
+  it("applies to bodyweight_epley effective load too", async () => {
+    const w = await import("@/lib/workout");
+    w.logBodyWeight("2026-07-01", 80);
+    expect(w.computeSetE1rm("BW Pull-up", 10, 5, "2026-07-02", 8)).toBe(
+      w.epley1rm(90, 7)
+    );
+  });
+
+  it("logSet stores the RPE-adjusted e1RM", async () => {
+    const w = await import("@/lib/workout");
+    const row = w.logSet({
+      week: 2, day: 1, exercise: "Unknown Lift", setNumber: 1,
+      actualWeight: 100, actualReps: 1, actualRpe: 6,
+    });
+    expect(row.e1rm).toBe(w.epley1rm(100, 5));
+  });
+});
+
 describe("logSet integration", () => {
   it("stores the bodyweight-aware e1RM on the set row", async () => {
     const w = await import("@/lib/workout");

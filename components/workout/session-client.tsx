@@ -545,7 +545,9 @@ function ExerciseCard({
   }
 
   const allLogged = allSets.every((s) => logged[keyOf(exercise.name, s.setNumber)]);
-  const lastSet = previous[keyOf(exercise.name, 1)];
+  // Program cue (e.g. "Crisp reps") — identical on every set, so it is shown
+  // once under the title instead of per row.
+  const programNotes = [...new Set(programSets.map((s) => s.note).filter(Boolean))];
 
   const repRange = programSets.length > 0
     ? [...new Set(programSets.map((s) => s.prescribedReps))]
@@ -604,14 +606,14 @@ function ExerciseCard({
         <div className="flex items-start justify-between px-4 pt-4 pb-3">
           <div className="flex-1 min-w-0 pr-3">
             <h3 className="text-xl font-bold text-[#f5f5f5] leading-tight">{exercise.name}</h3>
-            {lastSet?.weight != null && (
-              <p className="text-xs italic text-[#8e8e93] mt-1">
-                Last set · {lastSet.weight}kg × {lastSet.reps}{prevRpeSuffix(lastSet)}
+            {programNotes.length > 0 && (
+              <p className="text-xs text-[#8e8e93] mt-1 uppercase tracking-wide">
+                {programNotes.join(" · ")}
               </p>
             )}
-            <p className="text-xs text-[#8e8e93] mt-0.5">
+            <p className="text-sm text-[#f5f5f5] mt-0.5">
               {exercise.sets.length} sets{repRange ? ` × ${repRange} ${exercise.repMode === "time" ? "s" : "reps"}` : ""}
-              {isAccessory && <span className="ml-1 text-[#8e8e93]">· accessory</span>}
+              {isAccessory && <span className="ml-1 text-xs text-[#8e8e93]">· accessory</span>}
             </p>
           </div>
           <div className="flex items-center gap-3 pt-0.5">
@@ -849,19 +851,21 @@ function SetRow({
 
   const isLogged = !!logged;
   // Live e1RM preview mirrors the server's computeSetE1rm: bodyweight modes
-  // add the latest body weight to the (kg-converted) external weight.
+  // add the latest body weight to the (kg-converted) external weight, and the
+  // RPE slider credits reps in reserve (reps + (10 − RPE), RIR-adjusted Epley).
   const liveE1rm = (() => {
     if (logged?.e1rm != null) return logged.e1rm;
     if (e1rmMode === "none" || repMode === "time") return null;
     const wDisplay = Number(weight);
     const r = Number(reps);
     if (!Number.isFinite(wDisplay) || r < 1) return null;
+    const rEff = rpe >= 0 && rpe <= 10 ? r + (10 - rpe) : r;
     const wKg = unit === "lbs" ? wDisplay * displayToKg(1, "lbs") : wDisplay;
     if (e1rmMode === "bodyweight_epley") {
       if (bodyWeightKg == null || bodyWeightKg + wKg <= 0) return null;
-      return epley(Math.round((bodyWeightKg + wKg) * 10) / 10, r);
+      return epley(Math.round((bodyWeightKg + wKg) * 10) / 10, rEff);
     }
-    return wKg > 0 ? epley(wKg, r) : null;
+    return wKg > 0 ? epley(wKg, rEff) : null;
   })();
 
   // "BW − 20 kg" style annotation for bodyweight/assisted exercises.
@@ -950,11 +954,6 @@ function SetRow({
                   <line x1="20" y1="12" x2="23" y2="12" />
                 </svg>
               </button>
-            )}
-            {set.note && (
-              <span className="text-[10px] text-[#8e8e93] uppercase tracking-wide">
-                {set.note}
-              </span>
             )}
           </div>
           {prev?.weight != null && !isLogged && (

@@ -98,31 +98,42 @@ export function getLatestBodyWeightKg(onOrBefore?: string): number | null {
   return row?.weight_kg ?? null;
 }
 
+// RPE-aware effective reps (RIR-adjusted Epley): a set at RPE r had ~(10 − r)
+// reps in reserve, so it demonstrates the same 1RM as reps + (10 − r) reps
+// taken to failure. At RPE 10 (or with no RPE reported) this is plain Epley.
+export function effectiveReps(reps: number, rpe?: number | null): number {
+  if (rpe == null || rpe < 0 || rpe > 10) return reps;
+  return reps + (10 - rpe);
+}
+
 // Registry-aware e1RM for a logged set (D3, roadmap 3.4). The exercise's
 // e1rm_mode decides the formula:
-//   epley             — plain Epley on the external weight (weight may be 0 →
-//                       null, same as before the registry existed)
-//   bodyweight_epley  — Epley on effective load = latest body weight on/before
+//   epley             — RIR-adjusted Epley on the external weight (weight may
+//                       be 0 → null, same as before the registry existed)
+//   bodyweight_epley  — same, on effective load = latest body weight on/before
 //                       the session date + external weight (negative external
 //                       weight = assistance); null when no body weight is
 //                       logged or the effective load is non-positive
 //   none              — never computes an e1RM (e.g. timed holds)
-// Unknown exercise names behave as plain external/epley.
+// Unknown exercise names behave as plain external/epley. `rpe` (when reported)
+// credits reps in reserve — a 1-rep set @6 is worth far less than one @10.
 export function computeSetE1rm(
   exerciseName: string,
   weightKg: number,
   reps: number,
-  sessionDate?: string
+  sessionDate?: string,
+  rpe?: number | null
 ): number | null {
   const def = getExercise(exerciseName);
   const mode = def?.e1rmMode ?? "epley";
   if (mode === "none" || def?.repMode === "time") return null;
+  const r = effectiveReps(reps, rpe);
   if (mode === "bodyweight_epley") {
     const bw = getLatestBodyWeightKg(sessionDate);
     if (bw == null) return null;
-    return epley1rm(bw + weightKg, reps);
+    return epley1rm(bw + weightKg, r);
   }
-  return epley1rm(weightKg, reps);
+  return epley1rm(weightKg, r);
 }
 
 // Server-side weight validation per the exercise's load_mode (2.4 + 3.4).
@@ -480,6 +491,18 @@ export function startSession(week: number, day: number): SessionRow {
       "INSERT INTO workout_sessions (week, day, started_at) VALUES (?, ?, ?)"
     )
     .run(week, day, now);
+  markDirty(); // sessions are sheet-exported
+  return getSession(week, day)!;
+}
+
+// Restart the session clock: stamps started_at to now. Touches nothing else —
+// logged sets and completion state are preserved.
+export function resetSessionTimer(week: number, day: number): SessionRow | null {
+  const existing = getSession(week, day);
+  if (!existing?.startedAt) return existing ?? null;
+  getDb()
+    .prepare("UPDATE workout_sessions SET started_at = ? WHERE week = ? AND day = ?")
+    .run(new Date().toISOString(), week, day);
   markDirty(); // sessions are sheet-exported
   return getSession(week, day)!;
 }
@@ -900,7 +923,13 @@ export function logSet(input: LogSetInput): SetRow {
   // Bodyweight-aware e1RM uses the body weight at the session's date (falls
   // back to today when the session hasn't been started yet).
   const sessionDate = getSession(input.week, input.day)?.startedAt?.slice(0, 10);
-  const e1rm = computeSetE1rm(input.exercise, input.actualWeight, input.actualReps, sessionDate);
+  const e1rm = computeSetE1rm(
+    input.exercise,
+    input.actualWeight,
+    input.actualReps,
+    sessionDate,
+    input.actualRpe
+  );
 
   const existing = db
     .prepare(

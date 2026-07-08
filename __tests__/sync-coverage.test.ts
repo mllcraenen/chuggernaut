@@ -125,6 +125,13 @@ describe("mutators mark the sheet dirty", () => {
       const w = await import("@/lib/workout");
       w.uncompleteSession(1, 2);
     }],
+    ["resetSessionTimer", async () => {
+      const w = await import("@/lib/workout");
+      w.startSession(1, 3);
+      const { clearDirty } = await import("@/lib/sheets-sync");
+      clearDirty();
+      w.resetSessionTimer(1, 3);
+    }],
     ["logSet", async () => {
       const w = await import("@/lib/workout");
       w.logSet({ week: 1, day: 1, exercise: "X", setNumber: 1, actualWeight: 100, actualReps: 5 });

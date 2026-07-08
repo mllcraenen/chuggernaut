@@ -7,6 +7,7 @@ import {
   getSession,
   getSetsForSession,
   startSession,
+  resetSessionTimer,
 } from "@/lib/workout";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
   if (action === "complete") {
     const r = NextResponse.json(completeSession(wd.week, wd.day));
+    triggerExportIfDue();
+    return r;
+  }
+  if (action === "reset-timer") {
+    const r = NextResponse.json(resetSessionTimer(wd.week, wd.day));
     triggerExportIfDue();
     return r;
   }
