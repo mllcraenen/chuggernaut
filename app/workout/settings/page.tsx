@@ -64,6 +64,22 @@ export default async function WorkoutSettingsPage() {
           </div>
 
           <div>
+            <h2 className="text-base font-semibold mb-3">Exercises</h2>
+            <Link
+              href="/workout/exercises"
+              className="flex items-center justify-between rounded-xl border border-[#2a3352] bg-[#1e2740] px-4 py-3 hover:bg-[#242f4a] transition-colors"
+            >
+              <div>
+                <p className="text-sm font-medium text-[#f5f5f5]">Exercise library</p>
+                <p className="text-xs text-[#8e8e93] mt-0.5">
+                  Edit movements, swap options, load &amp; e1RM behaviour
+                </p>
+              </div>
+              <span className="text-[#3d5080] text-lg">›</span>
+            </Link>
+          </div>
+
+          <div>
             <h2 className="text-base font-semibold mb-3">Sync</h2>
             <SheetsSyncForm
               configured={sheetsStatus.configured}

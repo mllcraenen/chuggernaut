@@ -45,6 +45,7 @@ import {
   TAB_SWAPS,
   TAB_SESSIONS,
   TAB_SETTINGS,
+  TAB_EXERCISES,
   BLOCKS,
 } from "@/lib/workout-sheets";
 import { WorkoutSheetWriter } from "@/lib/sheet-writer";
@@ -62,6 +63,7 @@ const ALL_TABS = [
   TAB_SWAPS,
   TAB_SESSIONS,
   TAB_SETTINGS,
+  TAB_EXERCISES,
 ];
 
 function makeFakeSheets(getData: Record<string, unknown[][]> = {}) {
@@ -334,6 +336,40 @@ describe("notes ↔ sheet", () => {
     for (const block of BLOCKS) {
       expect(secondByTab[block.name]).toEqual(firstByTab[block.name]);
     }
+  });
+});
+
+// ---- Exercises tab (Phase 3, export-only) ----
+
+describe("Exercises tab", () => {
+  it("exports every registry exercise and skips the tab on import", async () => {
+    const { listExercises } = await import("@/lib/exercise-registry");
+    const { exportToSheet, importFromSheet } = await import("@/lib/workout-sheets");
+    const { getDb } = await import("@/lib/workout-db");
+
+    const { sheets, updates } = makeFakeSheets();
+    await exportToSheet({ sheets: sheets as never, spreadsheetId: "SID" });
+    const exUpdate = updates.find((u) => u.range.startsWith(`${TAB_EXERCISES}!`))!;
+    expect(exUpdate.values[0]).toEqual([
+      "name", "lift", "role", "load_mode", "rep_mode", "e1rm_mode", "archived", "alternatives",
+    ]);
+    const all = listExercises({ includeArchived: true });
+    expect(all.length).toBeGreaterThan(0);
+    expect(exUpdate.values.length).toBe(1 + all.length);
+
+    // Import must never touch the registry (export-only).
+    const before = getDb().prepare("SELECT COUNT(*) AS n FROM workout_exercises").get<{ n: number }>()!.n;
+    const data = {
+      [TAB_EXERCISES]: [
+        exUpdate.values[0],
+        ["Sheet Injected Exercise", "squat", "main", "external", "reps", "epley", 0, ""],
+      ] as unknown[][],
+    };
+    const { sheets: impSheets } = makeFakeSheets(data);
+    const result = await importFromSheet({ sheets: impSheets as never, spreadsheetId: "SID" });
+    expect(result.rowsByTab[TAB_EXERCISES]).toBe(0);
+    const after = getDb().prepare("SELECT COUNT(*) AS n FROM workout_exercises").get<{ n: number }>()!.n;
+    expect(after).toBe(before);
   });
 });
 

@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
-import { logSet, deleteSet, type LogSetInput } from "@/lib/workout";
+import { logSet, deleteSet, validateSetWeight, type LogSetInput } from "@/lib/workout";
 import { triggerExportIfDue } from "@/lib/workout-sheets";
 import { PROGRAM_WEEKS as WEEKS, PROGRAM_DAYS as DAYS } from "@/lib/workout-program";
 
@@ -41,8 +41,14 @@ export async function POST(request: NextRequest) {
   if (setNumber === null || setNumber < 1) {
     return NextResponse.json({ error: "invalid setNumber" }, { status: 400 });
   }
-  if (actualWeight === null || actualWeight < 0) {
+  if (actualWeight === null) {
     return NextResponse.json({ error: "invalid actualWeight" }, { status: 400 });
+  }
+  // Load-mode-aware guard (3.4): assisted exercises may log negative weight
+  // as long as body weight + weight stays positive; everything else is ≥ 0.
+  const weightError = validateSetWeight(exercise, actualWeight);
+  if (weightError !== null) {
+    return NextResponse.json({ error: weightError }, { status: 400 });
   }
   if (actualReps === null || actualReps < 1) {
     return NextResponse.json({ error: "invalid actualReps" }, { status: 400 });

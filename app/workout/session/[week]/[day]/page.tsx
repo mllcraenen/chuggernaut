@@ -9,7 +9,9 @@ import {
   getSwapsForSession,
   getNotesForSession,
   isOnboarded,
+  getLatestBodyWeightKg,
 } from "@/lib/workout";
+import { getExercise } from "@/lib/exercise-registry";
 import {
   getProgramDay,
   prescribedWeight,
@@ -81,10 +83,17 @@ export default async function SessionPage({ params }: Params) {
   const exercises: SessionExercise[] = programDay.exercises.map((ex) => {
     const effectiveName = swapMap[ex.name] ?? ex.name;
     const tm = ex.lift ? tms[ex.lift]?.trainingMax : undefined;
+    // Registry attributes drive the accessory gate, load/rep input behaviour
+    // and e1RM display; unknown (free-text swapped-in) names get defaults.
+    const def = getExercise(effectiveName);
     return {
       name: effectiveName,
       originalName: ex.name,
       lift: ex.lift,
+      role: def?.role ?? (ex.lift === null ? "accessory" : "main"),
+      loadMode: def?.loadMode ?? "external",
+      repMode: def?.repMode ?? "reps",
+      e1rmMode: def?.e1rmMode ?? "epley",
       isSwapped: effectiveName !== ex.name,
       sets: ex.sets.map((set) => {
         refs.push({ exercise: effectiveName, setNumber: set.setNumber });
@@ -201,6 +210,7 @@ export default async function SessionPage({ params }: Params) {
         previous={previous}
         completedAt={sessionRow?.completedAt ?? null}
         notes={notes}
+        bodyWeightKg={getLatestBodyWeightKg(sessionRow.startedAt?.slice(0, 10))}
       />
       <WorkoutTabBar />
     </div>

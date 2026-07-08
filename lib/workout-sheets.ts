@@ -1,11 +1,12 @@
 import { getDb } from "./workout-db";
-import { getSetting, setSetting, getTrainingMaxes, epley1rm } from "./workout";
+import { getSetting, setSetting, getTrainingMaxes, computeSetE1rm, validateSetWeight } from "./workout";
 import { PROGRAM, PROGRAM_BLOCKS } from "./workout-program";
 import { isDirty, clearDirty, markDirty } from "./sheets-sync";
 import { WorkoutSheetWriter, type BlockDefinition } from "./sheet-writer";
-import { TAB_SESSIONS, TAB_SETTINGS, SHEET_EXPORTED_SETTINGS } from "./sync-coverage";
+import { TAB_SESSIONS, TAB_SETTINGS, TAB_EXERCISES, SHEET_EXPORTED_SETTINGS } from "./sync-coverage";
+import { listExercises, getAlternativesFor } from "./exercise-registry";
 
-export { TAB_SESSIONS, TAB_SETTINGS };
+export { TAB_SESSIONS, TAB_SETTINGS, TAB_EXERCISES };
 
 export type { BlockDefinition };
 
@@ -48,6 +49,7 @@ export const TAB_HEADERS: Record<string, string[]> = {
   ],
   [TAB_SESSIONS]: ["week", "day", "started_at", "completed_at"],
   [TAB_SETTINGS]: ["key", "value"],
+  [TAB_EXERCISES]: ["name", "lift", "role", "load_mode", "rep_mode", "e1rm_mode", "archived", "alternatives"],
 };
 
 // Block tabs come first so they are the landing view. Non-block tabs follow:
@@ -60,6 +62,7 @@ const TAB_ORDER = [
   TAB_SWAPS,
   TAB_SESSIONS,
   TAB_SETTINGS,
+  TAB_EXERCISES,
 ];
 
 // Block tab names for test assertions and allow-list checks.
@@ -180,7 +183,12 @@ function makeWriter(): WorkoutSheetWriter {
     .all<{ week: number; day: number; exercise: string; note: string }>()) {
     notes[WorkoutSheetWriter.noteKey(n.week, n.day, n.exercise)] = n.note;
   }
-  return new WorkoutSheetWriter(PROGRAM, BLOCKS, tms, loggedSets, notes);
+  const timeExercises = new Set(
+    listExercises({ includeArchived: true })
+      .filter((e) => e.repMode === "time")
+      .map((e) => e.name)
+  );
+  return new WorkoutSheetWriter(PROGRAM, BLOCKS, tms, loggedSets, notes, timeExercises);
 }
 
 function readTabRows(tab: string): (string | number)[][] {
@@ -231,6 +239,18 @@ function readTabRows(tab: string): (string | number)[][] {
           .get<{ value: string }>(key);
         return [key, cell(row?.value ?? "")];
       });
+    }
+    case TAB_EXERCISES: {
+      return listExercises({ includeArchived: true }).map((e) => [
+        e.name,
+        cell(e.lift),
+        e.role,
+        e.loadMode,
+        e.repMode,
+        e.e1rmMode,
+        e.archived ? 1 : 0,
+        getAlternativesFor(e.name).join(", "),
+      ]);
     }
     default:
       return [];
@@ -288,10 +308,13 @@ function upsertTabRows(tab: string, rows: unknown[][], hasNotesColumn = false): 
     );
     const now = new Date().toISOString();
     for (const r of records) {
-      // Server-side guard (2.4): a sheet edit is client input like any other.
-      if ((r.actualWeight != null && r.actualWeight < 0) || (r.actualReps != null && r.actualReps < 1)) continue;
+      // Server-side guard (2.4/3.4): a sheet edit is client input like any
+      // other — load-mode-aware, so assisted exercises may carry negative
+      // weight while everything else stays ≥ 0.
+      if (r.actualWeight != null && validateSetWeight(r.exercise, r.actualWeight) !== null) continue;
+      if (r.actualReps != null && r.actualReps < 1) continue;
       const e1rm = (r.actualWeight != null && r.actualReps != null)
-        ? epley1rm(r.actualWeight, r.actualReps)
+        ? computeSetE1rm(r.exercise, r.actualWeight, r.actualReps)
         : null;
       const found = exists.get<{ id: number }>(r.week, r.day, r.exercise, r.setNumber);
       if (found) {
@@ -376,6 +399,7 @@ function upsertTabRows(tab: string, rows: unknown[][], hasNotesColumn = false): 
     // human-readable record; the DB stays authoritative. Explicitly skipped.
     case TAB_SESSIONS:
     case TAB_SETTINGS:
+    case TAB_EXERCISES:
       return 0;
     default:
       return 0;

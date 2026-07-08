@@ -1,6 +1,7 @@
 import { getDb } from "./workout-db";
 import { PROGRAM, PROGRAM_WEEKS, TM_FACTOR as TM_FACTOR_DEFAULT } from "./workout-program";
 import { markDirty } from "./sheets-sync";
+import { getExercise, getRegistryExercisesForLift, type ExerciseDef } from "./exercise-registry";
 
 // ----- Key-value settings -----
 
@@ -68,10 +69,64 @@ export function getTmFactor(): number {
 }
 
 // Epley estimated 1RM. Null for non-positive weight/reps — a 0 kg or
-// negative "lift" has no meaningful 1RM (bodyweight-aware e1RM lands in 3.4).
+// negative "lift" has no meaningful 1RM.
 export function epley1rm(weight: number, reps: number): number | null {
   if (weight <= 0 || reps <= 0) return null;
   return Math.round(weight * (1 + reps / 30) * 10) / 10;
+}
+
+// Latest body-weight entry on or before the given YYYY-MM-DD date (defaults
+// to today). Null when nothing is logged yet.
+export function getLatestBodyWeightKg(onOrBefore?: string): number | null {
+  const cutoff = onOrBefore ?? new Date().toISOString().slice(0, 10);
+  const row = getDb()
+    .prepare(
+      "SELECT weight_kg FROM workout_body_weight WHERE date <= ? ORDER BY date DESC LIMIT 1"
+    )
+    .get<{ weight_kg: number }>(cutoff);
+  return row?.weight_kg ?? null;
+}
+
+// Registry-aware e1RM for a logged set (D3, roadmap 3.4). The exercise's
+// e1rm_mode decides the formula:
+//   epley             — plain Epley on the external weight (weight may be 0 →
+//                       null, same as before the registry existed)
+//   bodyweight_epley  — Epley on effective load = latest body weight on/before
+//                       the session date + external weight (negative external
+//                       weight = assistance); null when no body weight is
+//                       logged or the effective load is non-positive
+//   none              — never computes an e1RM (e.g. timed holds)
+// Unknown exercise names behave as plain external/epley.
+export function computeSetE1rm(
+  exerciseName: string,
+  weightKg: number,
+  reps: number,
+  sessionDate?: string
+): number | null {
+  const def = getExercise(exerciseName);
+  const mode = def?.e1rmMode ?? "epley";
+  if (mode === "none" || def?.repMode === "time") return null;
+  if (mode === "bodyweight_epley") {
+    const bw = getLatestBodyWeightKg(sessionDate);
+    if (bw == null) return null;
+    return epley1rm(bw + weightKg, reps);
+  }
+  return epley1rm(weightKg, reps);
+}
+
+// Server-side weight validation per the exercise's load_mode (2.4 + 3.4).
+// Returns null when valid, otherwise a human-readable rejection reason.
+export function validateSetWeight(exerciseName: string, weightKg: number): string | null {
+  const def: ExerciseDef | null = getExercise(exerciseName);
+  const loadMode = def?.loadMode ?? "external";
+  if (loadMode === "assisted") {
+    if (weightKg >= 0) return null;
+    const bw = getLatestBodyWeightKg();
+    if (bw == null) return "log a body weight before logging assisted sets with negative weight";
+    if (bw + weightKg <= 0) return `assistance exceeds body weight (${bw} kg)`;
+    return null;
+  }
+  return weightKg < 0 ? "weight must be ≥ 0" : null;
 }
 
 // ----- Types -----
@@ -453,17 +508,11 @@ export interface E1rmPoint {
   loggedAt: string;
 }
 
-// Exercise names belonging to a lift, derived from the program's `ex.lift`
-// field (never from name patterns). Active swaps fold in: a swapped-in
-// exercise inherits the original's lift. This helper is the single seam the
-// exercise registry (Phase 3) later replaces.
+// Exercise names belonging to a lift, read from the exercise registry (which
+// is seeded from the program's `ex.lift` field — never from name patterns).
+// Active swaps fold in: a swapped-in exercise inherits the original's lift.
 export function getExercisesForLift(lift: LiftId): string[] {
-  const names = new Set<string>();
-  for (const day of PROGRAM) {
-    for (const ex of day.exercises) {
-      if (ex.lift === lift) names.add(ex.name);
-    }
-  }
+  const names = new Set<string>(getRegistryExercisesForLift(lift));
   const swaps = getDb()
     .prepare("SELECT original_exercise, replacement_exercise FROM workout_swaps")
     .all<{ original_exercise: string; replacement_exercise: string }>();
@@ -698,7 +747,10 @@ export interface LogSetInput {
 export function logSet(input: LogSetInput): SetRow {
   const db = getDb();
   const now = new Date().toISOString();
-  const e1rm = epley1rm(input.actualWeight, input.actualReps);
+  // Bodyweight-aware e1RM uses the body weight at the session's date (falls
+  // back to today when the session hasn't been started yet).
+  const sessionDate = getSession(input.week, input.day)?.startedAt?.slice(0, 10);
+  const e1rm = computeSetE1rm(input.exercise, input.actualWeight, input.actualReps, sessionDate);
 
   const existing = db
     .prepare(
